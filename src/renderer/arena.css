@@ -1,0 +1,14 @@
+.arena-container {
+  aspect-ratio: 1 / 1;
+  width: 100%;
+  max-width: 384px;
+  position: relative;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+}
+
+.arena-container canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
