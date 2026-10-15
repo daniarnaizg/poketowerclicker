@@ -1,5 +1,5 @@
 /**
- * PokéBastion — in-arena HUD: floor, boss timer, bastion HP and ultimate charge.
+ * PokéBastion — HUD sobre la arena: piso, cronómetro de jefe, HP del Bastión y ULT.
  */
 
 import { BOSS_TIMER_DURATION } from '../../config/balance.config';
@@ -25,37 +25,36 @@ export function GameHUD({ gameState }: Props) {
     gameState.ultimateMax > 0
       ? Math.max(0, Math.min(1, gameState.ultimateCharge / gameState.ultimateMax))
       : 0;
+  const hpColor = hpRatio > 0.5 ? '#48c048' : hpRatio >= 0.25 ? '#f8d030' : '#f04040';
 
   return (
-    <div class="pointer-events-none absolute inset-x-0 top-0 flex flex-col gap-1 p-2 text-white">
-      <div class="flex items-center justify-between gap-2">
-        <span class="rounded bg-slate-900/70 px-3 py-1 text-sm font-bold">Piso {gameState.floor}</span>
-        <span class="rounded bg-slate-900/70 px-3 py-1 text-xs">
-          Enemigos: {gameState.waveEnemiesRemaining}
-        </span>
+    <div class="pk-window flex shrink-0 flex-col gap-2.5 p-3">
+      <div class="flex items-center justify-between gap-2 text-[10px]">
+        <span class="pk-dark px-2 py-2">PISO {gameState.floor}</span>
+        <span class="pk-dark px-2 py-2">SALVAJES {gameState.waveEnemiesRemaining}</span>
         {gameState.bossTimerSec !== undefined && (
-          <span class="rounded bg-red-900/80 px-3 py-1 text-sm font-bold text-red-100">
-            ⏱ {formatClock(gameState.bossTimerSec)} / {BOSS_TIMER_DURATION}s
+          <span class="pk-dark px-2 py-2 text-[#f85848]">
+            {formatClock(gameState.bossTimerSec)}/{BOSS_TIMER_DURATION}s
           </span>
         )}
       </div>
 
-      <div class="flex items-center gap-2">
-        <span class="text-xs font-semibold text-slate-200">BASTIÓN</span>
-        <span class="h-3 flex-1 overflow-hidden rounded-full bg-slate-900/70">
-          <span class="block h-full bg-emerald-500" style={{ width: `${hpRatio * 100}%` }} />
+      <div class="flex items-center gap-2 text-[9px]">
+        <span class="w-14 shrink-0">BASTION</span>
+        <span class="pk-bar flex-1">
+          <span style={{ width: `${hpRatio * 100}%`, background: hpColor }} />
         </span>
-        <span class="text-xs tabular-nums">
-          {Math.ceil(gameState.bastionHp)} / {gameState.bastionMaxHp}
+        <span class="pk-num">
+          {Math.ceil(gameState.bastionHp)}/{gameState.bastionMaxHp}
         </span>
       </div>
 
-      <div class="flex items-center gap-2">
-        <span class="text-xs font-semibold text-slate-200">ULT</span>
-        <span class="h-2 flex-1 overflow-hidden rounded-full bg-slate-900/70">
-          <span class="block h-full bg-sky-400" style={{ width: `${ultRatio * 100}%` }} />
+      <div class="flex items-center gap-2 text-[9px]">
+        <span class="w-14 shrink-0">ULT</span>
+        <span class="pk-bar flex-1">
+          <span style={{ width: `${ultRatio * 100}%`, background: '#58b0f8' }} />
         </span>
-        <span class="rounded bg-slate-900/70 px-2 py-0.5 text-xs">Espacio</span>
+        <span class="pk-chip" style={{ background: '#585858' }}>ESPACIO</span>
       </div>
     </div>
   );

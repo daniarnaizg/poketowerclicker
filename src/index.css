@@ -2,12 +2,53 @@
 @tailwind components;
 @tailwind utilities;
 
-* {
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
-}
+* { margin: 0; padding: 0; box-sizing: border-box; }
 
 body {
-  font-family: system-ui, -apple-system, sans-serif;
+  font-family: 'Press Start 2P', 'Courier New', monospace;
+  color: #303030;
+  background-color: #2858a8;
+  background-image:
+    linear-gradient(#ffffff10 2px, transparent 2px),
+    linear-gradient(90deg, #ffffff10 2px, transparent 2px);
+  background-size: 32px 32px;
+  image-rendering: pixelated;
+}
+
+@layer components {
+  /* Ventana de menú estilo Pokémon (crema + marco oscuro + filo interior) */
+  .pk-window {
+    background: #f8f8f0; color: #303030;
+    border: 4px solid #303030; border-radius: 6px;
+    box-shadow: inset 0 0 0 4px #c8d0d8, 0 6px 0 #00000055;
+  }
+  /* Ventana oscura (HUD) */
+  .pk-dark {
+    background: #303030; color: #f8f8f0;
+    border: 4px solid #f8f8f0; border-radius: 4px;
+    box-shadow: 0 0 0 4px #303030;
+  }
+  .pk-btn {
+    font-family: 'Press Start 2P', monospace; line-height: 1.5;
+    background: #f8f8f0; color: #303030;
+    border: 4px solid #303030; border-radius: 4px; box-shadow: 0 4px 0 #303030;
+    min-height: 44px; cursor: pointer; transition: transform .05s;
+  }
+  .pk-btn:enabled:hover { background: #ffd860; }
+  .pk-btn:enabled:active { transform: translateY(3px); box-shadow: 0 1px 0 #303030; }
+  .pk-btn:disabled { opacity: .5; cursor: not-allowed; }
+  .pk-btn-active { background: #ffd860; }
+  .pk-chip {
+    font-size: 9px; color: #fff; padding: 4px 6px; border: 2px solid #303030;
+    border-radius: 3px; text-shadow: 1px 1px 0 #00000088; white-space: nowrap;
+  }
+  .pk-bar { height: 14px; background: #f8f8f0; border: 3px solid #303030; border-radius: 3px; overflow: hidden; }
+  .pk-bar > span { display: block; height: 100%; }
+  .pk-ball {
+    display: inline-block; flex: none; width: 24px; height: 24px; border: 3px solid #303030;
+    border-radius: 50%; background: linear-gradient(#e03828 0 42%, #303030 42% 58%, #f8f8f8 58%);
+  }
+  .pk-ball-gold { background: #f8d030; }
+  .pk-num { font-family: 'VT323', monospace; font-size: 22px; line-height: 1; }
+  .pk-sprite { image-rendering: pixelated; }
 }

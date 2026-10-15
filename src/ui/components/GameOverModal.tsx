@@ -4,6 +4,7 @@
 
 import { runePayout } from '../../config/balance.config';
 import { POKEDEX } from '../../data/pokemon';
+import { portraitUrl } from '../pokeAssets';
 import type { RunStats, Team6 } from '../../core/types';
 
 interface Props {
@@ -32,9 +33,9 @@ function formatDuration(totalSec: number): string {
 
 function Stat({ label, value }: { label: string; value: string | number }) {
   return (
-    <div class="rounded-lg bg-slate-800 p-3">
-      <dt class="text-xs uppercase tracking-wide text-slate-400">{label}</dt>
-      <dd class="text-lg font-semibold">{value}</dd>
+    <div class="pk-dark p-3">
+      <dt class="text-[9px] text-[#a8c0e0]">{label}</dt>
+      <dd class="mt-2 text-sm">{value}</dd>
     </div>
   );
 }
@@ -47,29 +48,40 @@ export function GameOverModal({ runStats, team, onRestart }: Props) {
     : '—';
   const cause = defeatLabel(runStats);
   return (
-    <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
-      <div class="w-full max-w-md rounded-2xl border border-amber-500/40 bg-slate-900 p-6 text-white shadow-2xl">
-        <h2 class="text-center text-2xl font-bold text-amber-400">🏆 Ficha de Entrenador</h2>
-        <dl class="mt-5 grid grid-cols-2 gap-3 text-sm">
-          <Stat label="Piso alcanzado" value={runStats.floorReached} />
-          <Stat label="Bajas" value={runStats.totalKills} />
-          <Stat label="Oro ganado" value={runStats.totalGoldEarned} />
-          <Stat label="Duración" value={formatDuration(runStats.durationSec)} />
-          <Stat label="Causa" value={cause} />
+    <div class="fixed inset-0 z-50 flex items-center justify-center bg-[#181830]/90 p-4">
+      <div class="pk-window w-full max-w-lg p-6">
+        <h2 class="flex items-center justify-center gap-3 text-sm leading-relaxed sm:text-base">
+          <span class="pk-ball" /> FICHA DE ENTRENADOR <span class="pk-ball" />
+        </h2>
+        <dl class="mt-5 grid grid-cols-2 gap-3">
+          <Stat label="PISO" value={runStats.floorReached} />
+          <Stat label="BAJAS" value={runStats.totalKills} />
+          <Stat label="ORO GANADO" value={runStats.totalGoldEarned} />
+          <Stat label="DURACIÓN" value={formatDuration(runStats.durationSec)} />
           <div class="col-span-2">
-            <Stat label="MVP" value={mvp} />
+            <Stat label="CAUSA" value={cause} />
+          </div>
+          <div class="col-span-2 flex items-center gap-3">
+            {mvpPokemon && (
+              <img
+                class="pk-sprite h-12 w-12"
+                src={portraitUrl(mvpPokemon.definitionId)}
+                alt=""
+                width={48}
+                height={48}
+              />
+            )}
+            <div class="flex-1">
+              <Stat label="★ MVP" value={mvp} />
+            </div>
           </div>
         </dl>
-        <div class="mt-4 rounded-lg bg-slate-800 p-3 text-center">
-          <span class="text-xs uppercase tracking-wide text-slate-400">Runas ganadas</span>
-          <div class="text-3xl font-bold text-amber-300">🔮 {runes}</div>
+        <div class="mt-4 text-center text-[11px] leading-loose">
+          RUNAS GANADAS
+          <div class="pk-num text-4xl text-[#803080]">{runes}</div>
         </div>
-        <button
-          type="button"
-          onClick={onRestart}
-          class="mt-4 w-full rounded-lg bg-amber-500 px-4 py-2 font-semibold text-slate-900 transition hover:bg-amber-400"
-        >
-          Nueva partida
+        <button type="button" onClick={onRestart} class="pk-btn mt-4 w-full bg-[#e03828] px-4 py-3 text-sm text-white enabled:hover:bg-[#f05848]">
+          NUEVA PARTIDA
         </button>
       </div>
     </div>

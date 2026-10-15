@@ -17,7 +17,7 @@ import { tickGame } from './core/gameLoop';
 import { TYPE_CHART } from './core/damage';
 import { POKEDEX } from './data/pokemon';
 import { ARENA } from './config/arena.config';
-import { BASTION_BASE_HP } from './config/balance.config';
+import { BASTION_BASE_HP, FIXED_TIMESTEP } from './config/balance.config';
 import type {
   BastionUpgrades as BastionUpgradeLevels,
   Cooldowns6,
@@ -26,6 +26,10 @@ import type {
   Team6,
   TeamSlot,
 } from './core/types';
+
+/** Paso fijo del núcleo y máximo de pasos de recuperación por fotograma. */
+const STEP_MS = FIXED_TIMESTEP * 1000;
+const MAX_CATCHUP_STEPS = 5;
 
 /** Seed 1 == "seed from floor 1"; each run restarts the same deterministic stream. */
 const GAME_CONFIG: GameConfig = { pokedex: POKEDEX, typeChart: TYPE_CHART, seed: 1 };
@@ -105,10 +109,17 @@ export default function App() {
 
     let raf = 0;
     let last = performance.now();
+    // Acumulador: tickGame descarta el resto de delta/paso fijo, así que en monitores
+    // de >60 Hz (delta < 16,7 ms) el juego no avanzaba nunca. Acumulamos aquí y
+    // pasamos solo múltiplos exactos del paso fijo.
+    let acc = 0;
     const frame = (now: number): void => {
-      const delta = now - last;
+      acc = Math.min(acc + (now - last), STEP_MS * MAX_CATCHUP_STEPS);
       last = now;
+      const steps = Math.floor((acc + 0.001) / STEP_MS);
+      acc -= steps * STEP_MS;
       const input = store.consumeInput();
+      const delta = steps > 0 ? steps * STEP_MS + 0.001 : 0;
       const next = tickGame(stateRef.current, input, GAME_CONFIG, delta, rngRef.current);
       stateRef.current = next;
       store.setGameState(next); // throttled to ~10 Hz, always on phase change
@@ -161,17 +172,17 @@ export default function App() {
   };
 
   return (
-    <div class="flex h-screen bg-gray-900 text-white">
-      <div class="flex flex-1 items-center justify-center p-4">
+    <div class="flex h-screen flex-col overflow-y-auto lg:flex-row lg:overflow-hidden">
+      <div class="arena-stage min-h-[70vw] p-5 lg:min-h-0 lg:p-8">
         <div class="arena-container">
           <canvas ref={canvasRef} width={ARENA.SIZE} height={ARENA.SIZE} />
-          {gameState && <GameHUD gameState={gameState} />}
         </div>
       </div>
 
-      <div class="flex w-80 flex-col gap-2 overflow-y-auto p-4">
+      <div class="flex w-full flex-col gap-4 p-4 lg:h-full lg:w-[26rem] lg:overflow-hidden lg:p-6">
         {gameState && (
           <>
+            <GameHUD gameState={gameState} />
             <TeamBar
               team={gameState.team}
               hotSwapCooldowns={gameState.hotSwapCooldowns}

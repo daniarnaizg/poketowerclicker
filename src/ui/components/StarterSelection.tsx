@@ -1,35 +1,51 @@
 /**
- * PokéBastion — starter picker modal shown during the STARTER_SELECT phase.
+ * PokéBastion — selector de inicial, estilo laboratorio del Profesor.
  */
 
 import { STARTER_IDS } from '../../config/balance.config';
 import { POKEDEX } from '../../data/pokemon';
-import { TYPE_COLORS } from '../typeColors';
+import { portraitUrl } from '../pokeAssets';
+import { TypeChip } from './TypeChip';
 
 export function StarterSelection({ onSelect }: { onSelect: (id: string) => void }) {
   return (
-    <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
-      <div class="w-full max-w-2xl rounded-2xl border border-slate-700 bg-slate-900 p-6 shadow-2xl">
-        <h1 class="text-center text-2xl font-bold text-white">Elige tu Pokémon inicial</h1>
-        <div class="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
+    <div
+      class="fixed inset-0 z-50 flex items-center justify-center p-4"
+      style={{
+        backgroundColor: '#e03828',
+        backgroundImage: 'linear-gradient(#00000018 50%, transparent 50%)',
+        backgroundSize: '100% 8px',
+      }}
+    >
+      <div class="pk-window w-full max-w-3xl p-6 text-center sm:p-8">
+        <h1 class="flex items-center justify-center gap-3 text-base leading-relaxed sm:text-xl">
+          <span class="pk-ball" /> ¡ELIGE A TU POKÉMON! <span class="pk-ball" />
+        </h1>
+        <p class="pk-num mt-2 text-2xl" style={{ fontSize: '26px' }}>
+          El profesor te ofrece a tu primer compañero.
+        </p>
+        <div class="mt-6 grid grid-cols-1 gap-5 sm:grid-cols-3">
           {STARTER_IDS.map((id) => {
             const def = POKEDEX[id];
-            const color = TYPE_COLORS[def.types[0]];
             return (
               <button
                 key={id}
                 type="button"
                 onClick={() => onSelect(id)}
-                style={{ borderColor: color }}
-                class="group flex flex-col items-center rounded-xl border-2 bg-slate-800/80 p-4 transition hover:-translate-y-1 hover:bg-slate-700"
+                class="pk-btn flex flex-col items-center gap-3 px-2 py-5"
               >
-                <span class="h-16 w-16 rounded-full" style={{ backgroundColor: color }} />
-                <span class="mt-3 text-lg font-semibold text-white">{def.name}</span>
-                <span
-                  class="text-xs uppercase tracking-wide"
-                  style={{ color }}
-                >
-                  {def.types.join(' / ')}
+                <img
+                  class="pk-sprite h-24 w-24"
+                  src={portraitUrl(id)}
+                  alt={def.name}
+                  width={96}
+                  height={96}
+                />
+                <span class="text-xs sm:text-sm">{def.name.toUpperCase()}</span>
+                <span class="flex gap-1.5">
+                  {def.types.map((t) => (
+                    <TypeChip key={t} type={t} />
+                  ))}
                 </span>
               </button>
             );

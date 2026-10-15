@@ -42,54 +42,59 @@ const UPGRADE_INFO: Record<BastionUpgradeId, { name: string; effect: string }> =
 export function BastionUpgrades({ upgrades, gold, teamLevel, onPurchase, onBuyTeamLevel }: Props) {
   const teamCost = teamLevelCost(teamLevel);
   return (
-    <div class="flex w-64 flex-col gap-2 rounded-lg border border-slate-700 bg-slate-900/90 p-3 text-white">
-      <div class="flex items-center justify-between">
-        <span class="text-sm font-semibold uppercase tracking-wide text-slate-400">Bastión</span>
-        <span class="font-bold text-amber-400">🪙 {gold}</span>
+    <div class="pk-window flex min-h-0 flex-col gap-2.5 p-3">
+      <div class="flex shrink-0 items-center justify-between text-[11px]">
+        <span>MEJORAS</span>
+        <span class="flex items-center gap-2">
+          <span class="pk-ball pk-ball-gold" /> {gold}
+        </span>
       </div>
 
       <button
         type="button"
         onClick={onBuyTeamLevel}
         disabled={gold < teamCost}
-        class="flex items-center justify-between rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-left transition enabled:hover:bg-amber-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+        class="pk-btn pk-btn-active flex shrink-0 items-center justify-between gap-2 px-3 py-2 text-left text-[10px]"
       >
         <span>
-          <span class="block text-sm font-semibold">Nivel de equipo</span>
-          <span class="block text-xs text-slate-400">
-            Nv {teamLevel} → {teamLevel + 1}
-          </span>
+          NIVEL EQUIPO
+          <span class="pk-num block">Nv {teamLevel} → {teamLevel + 1}</span>
         </span>
-        <span class="text-sm font-bold text-amber-400">{teamCost} 🪙</span>
+        <span>{teamCost}</span>
       </button>
 
-      <div class="flex flex-col gap-1.5">
+      <div
+        class="grid min-h-0 grid-cols-2 gap-2 overflow-y-auto pb-1 pr-1"
+        style={{ scrollbarWidth: 'thin' }}
+      >
         {BASTION_UPGRADE_IDS.map((id) => {
           const level = upgrades[id];
           const cost = upgradeCost(id, level);
-          const affordable = gold >= cost;
           const info = UPGRADE_INFO[id];
           return (
             <button
               key={id}
               type="button"
+              title={info.effect}
               onClick={() => onPurchase(id)}
-              disabled={!affordable}
-              class="flex flex-col gap-1 rounded-lg border border-slate-700 bg-slate-800/80 px-3 py-2 text-left transition enabled:hover:border-amber-500/60 enabled:hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
+              disabled={gold < cost}
+              class="pk-btn flex flex-col gap-1.5 px-2 py-2 text-left text-[9px]"
             >
-              <span class="flex items-center justify-between text-sm font-semibold">
-                <span>{info.name}</span>
-                <span class="text-xs text-slate-400">Nv {level}</span>
-              </span>
-              <span class="text-xs text-slate-400">{info.effect}</span>
-              <span class="flex items-center gap-2">
-                <span class="h-1.5 flex-1 overflow-hidden rounded bg-slate-700">
+              <span class="truncate">{info.name}</span>
+              <span class="flex items-center gap-1.5">
+                <span class="pk-bar flex-1" style={{ height: '10px' }}>
                   <span
-                    class="block h-full bg-sky-400"
-                    style={{ width: `${Math.min(level, LEVEL_BAR_MAX) / LEVEL_BAR_MAX * 100}%` }}
+                    style={{
+                      width: `${(Math.min(level, LEVEL_BAR_MAX) / LEVEL_BAR_MAX) * 100}%`,
+                      background: '#58b0f8',
+                    }}
                   />
                 </span>
-                <span class="text-xs font-bold text-amber-400">{cost} 🪙</span>
+                <span class="pk-num">Nv {level}</span>
+              </span>
+              <span class="flex items-center justify-end gap-1.5">
+                <span class="pk-ball pk-ball-gold" style={{ width: '14px', height: '14px', borderWidth: '2px' }} />
+                {cost}
               </span>
             </button>
           );

@@ -1,6 +1,7 @@
 /**
- * PokéBastion — shared PokémonType → hex palette for UI accents.
- * Kept UI-side (core stays DOM/CSS-free); components tint circles and borders.
+ * PokéBastion — PokémonType → paleta UI (colores + etiqueta en español).
+ * TYPE_COLORS: color "vivo" para bordes/sprites. TYPE_CHIP: variante oscura
+ * con contraste suficiente para texto blanco en las etiquetas de tipo.
  */
 
 import { PokemonType } from '../core/types';
@@ -24,4 +25,46 @@ export const TYPE_COLORS: Record<PokemonType, string> = {
   [PokemonType.Dark]: '#705848',
   [PokemonType.Steel]: '#b8b8d0',
   [PokemonType.Fairy]: '#ee99ac',
+};
+
+export const TYPE_CHIP: Record<PokemonType, string> = {
+  [PokemonType.Normal]: '#787850',
+  [PokemonType.Fire]: '#c06018',
+  [PokemonType.Water]: '#4868c0',
+  [PokemonType.Grass]: '#488830',
+  [PokemonType.Electric]: '#a08000',
+  [PokemonType.Ice]: '#488888',
+  [PokemonType.Fighting]: '#a02018',
+  [PokemonType.Poison]: '#803080',
+  [PokemonType.Ground]: '#907028',
+  [PokemonType.Flying]: '#6850c0',
+  [PokemonType.Psychic]: '#c02860',
+  [PokemonType.Bug]: '#788800',
+  [PokemonType.Rock]: '#887018',
+  [PokemonType.Ghost]: '#584078',
+  [PokemonType.Dragon]: '#5028c8',
+  [PokemonType.Dark]: '#504038',
+  [PokemonType.Steel]: '#686880',
+  [PokemonType.Fairy]: '#b05878',
+};
+
+export const TYPE_LABEL_ES: Record<PokemonType, string> = {
+  [PokemonType.Normal]: 'NORMAL',
+  [PokemonType.Fire]: 'FUEGO',
+  [PokemonType.Water]: 'AGUA',
+  [PokemonType.Grass]: 'PLANTA',
+  [PokemonType.Electric]: 'ELÉCTR.',
+  [PokemonType.Ice]: 'HIELO',
+  [PokemonType.Fighting]: 'LUCHA',
+  [PokemonType.Poison]: 'VENENO',
+  [PokemonType.Ground]: 'TIERRA',
+  [PokemonType.Flying]: 'VOLADOR',
+  [PokemonType.Psychic]: 'PSÍQ.',
+  [PokemonType.Bug]: 'BICHO',
+  [PokemonType.Rock]: 'ROCA',
+  [PokemonType.Ghost]: 'FANT.',
+  [PokemonType.Dragon]: 'DRAGÓN',
+  [PokemonType.Dark]: 'SINIES.',
+  [PokemonType.Steel]: 'ACERO',
+  [PokemonType.Fairy]: 'HADA',
 };

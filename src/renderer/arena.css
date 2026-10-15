@@ -1,11 +1,24 @@
+/* Escenario: ocupa todo el espacio libre y es contenedor de tamaño. */
+.arena-stage {
+  container-type: size;
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* La arena es el mayor cuadrado que cabe en el escenario. */
 .arena-container {
   aspect-ratio: 1 / 1;
-  width: 100%;
-  max-width: 384px;
-  max-height: min(384px, calc(100vh - 2rem));
+  width: min(100cqw, 100cqh);
   position: relative;
   image-rendering: pixelated;
   image-rendering: crisp-edges;
+  /* Marco pixel-art: borde oscuro + filo crema + borde oscuro exterior */
+  border: 6px solid #303030;
+  box-shadow: 0 0 0 6px #f8f8f0, 0 0 0 10px #303030;
 }
 
 .arena-container canvas {
