@@ -15,5 +15,10 @@ export default defineConfig({
   },
   server: {
     port: 3000
+  },
+  test: {
+    // Vitest externalizes deps by default, which bypasses the react->preact
+    // aliases above; inline zustand so its Preact-compat entry resolves.
+    server: { deps: { inline: ['zustand'] } }
   }
 });
