@@ -124,6 +124,7 @@ export function renderFloatingText(
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   for (const t of texts) {
+    if (t.age >= t.maxAge) continue;
     const life = t.maxAge > 0 ? 1 - t.age / t.maxAge : 0;
     ctx.globalAlpha = Math.max(0, Math.min(1, life));
     ctx.fillStyle = t.color;

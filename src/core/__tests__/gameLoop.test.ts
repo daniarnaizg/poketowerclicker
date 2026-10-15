@@ -61,6 +61,7 @@ function emptyState(): GameState {
       totalKills: 0,
       totalGoldEarned: 0,
       totalDamageDealt: 0,
+      damagePerSlot: [0, 0, 0, 0, 0, 0],
       mvpSlotIndex: -1,
       floorReached: 0,
       durationSec: 0,
@@ -179,5 +180,54 @@ describe('tickGame', () => {
     const next = tickGame(doomed, {}, config, 16.7, mulberry32(42));
     expect(next.phase).toBe('GAME_OVER');
     expect(next.bastionHp).toBe(0);
+    expect(next.runStats.defeatCause).toBe('bastionDestroyed');
+    expect(next.runStats.defeatEnemyType).toBeDefined();
+  });
+
+  it('regenerates bastion HP passively each step', () => {
+    const base = startingRun(51);
+    const hurt: GameState = { ...base, bastionHp: 50 };
+    const next = tickGame(hurt, {}, config, 16.7, mulberry32(52));
+    expect(next.bastionHp).toBeGreaterThan(50);
+  });
+
+  it('hits nearby enemies with a switch-in burst and credits the incoming slot', () => {
+    const base = startingRun(61);
+    const bench = { ...base.team[0].pokemon!, id: 99 };
+    const atCenter = { ...base.enemies[0], x: ARENA.CENTER, y: ARENA.CENTER, hp: 100_000, maxHp: 100_000 };
+    const withBench: GameState = {
+      ...base,
+      team: base.team.map((slot, i) => (i === 1 ? { ...slot, pokemon: bench } : slot)) as Team6,
+      enemies: [atCenter],
+      waveEnemiesRemaining: 1,
+    };
+
+    const swapped = tickGame(withBench, { hotSwapIndex: 1 }, config, 0, mulberry32(62));
+    expect(swapped.runStats.damagePerSlot[1]).toBeGreaterThan(0);
+    expect(swapped.runStats.totalDamageDealt).toBeGreaterThan(0);
+    expect(swapped.enemies.find((e) => e.id === atCenter.id)?.hp).toBeLessThan(atCenter.hp);
+    expect(swapped.floatingTexts.length).toBeGreaterThan(0);
+  });
+
+  it('records the highest-damage slot as MVP on game over', () => {
+    const base = startingRun(71);
+    const atCenter = { ...base.enemies[0], x: ARENA.CENTER, y: ARENA.CENTER };
+    const doomed: GameState = {
+      ...base,
+      bastionHp: 1,
+      enemies: [atCenter],
+      waveEnemiesRemaining: 1,
+      runStats: { ...base.runStats, damagePerSlot: [0, 10, 0, 0, 0, 0] },
+    };
+    const next = tickGame(doomed, {}, config, 16.7, mulberry32(72));
+    expect(next.phase).toBe('GAME_OVER');
+    expect(next.runStats.mvpSlotIndex).toBe(1);
+  });
+
+  it('ages and expires floating texts', () => {
+    const base = startingRun(81);
+    const stale = { id: 999, x: 10, y: 10, text: '999', color: '#ffffff', age: 0.99, maxAge: 1 };
+    const next = tickGame({ ...base, floatingTexts: [stale] }, {}, config, 16.7, mulberry32(82));
+    expect(next.floatingTexts.some((t) => t.id === 999)).toBe(false);
   });
 });

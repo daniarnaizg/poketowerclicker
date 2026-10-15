@@ -79,6 +79,7 @@ function createInitialState(): GameState {
       totalKills: 0,
       totalGoldEarned: 0,
       totalDamageDealt: 0,
+      damagePerSlot: [0, 0, 0, 0, 0, 0],
       mvpSlotIndex: -1,
       floorReached: 1,
       durationSec: 0,
@@ -192,7 +193,7 @@ export default function App() {
         <StarterSelection onSelect={(id) => useGameStore.getState().selectStarter(id)} />
       )}
       {phase === 'GAME_OVER' && gameState && (
-        <GameOverModal runStats={gameState.runStats} onRestart={handleRestart} />
+        <GameOverModal runStats={gameState.runStats} team={gameState.team} onRestart={handleRestart} />
       )}
     </div>
   );

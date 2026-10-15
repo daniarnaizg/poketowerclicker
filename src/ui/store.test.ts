@@ -33,6 +33,7 @@ function makeState(phase: GameState['phase']): GameState {
       totalKills: 0,
       totalGoldEarned: 0,
       totalDamageDealt: 0,
+      damagePerSlot: [0, 0, 0, 0, 0, 0],
       mvpSlotIndex: -1,
       floorReached: 1,
       durationSec: 0,

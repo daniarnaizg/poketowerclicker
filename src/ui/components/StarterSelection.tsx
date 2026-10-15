@@ -11,9 +11,6 @@ export function StarterSelection({ onSelect }: { onSelect: (id: string) => void 
     <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
       <div class="w-full max-w-2xl rounded-2xl border border-slate-700 bg-slate-900 p-6 shadow-2xl">
         <h1 class="text-center text-2xl font-bold text-white">Elige tu Pokémon inicial</h1>
-        <p class="mt-1 text-center text-sm text-slate-400">
-          Los otros dos formarán tu banquillo.
-        </p>
         <div class="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
           {STARTER_IDS.map((id) => {
             const def = POKEDEX[id];

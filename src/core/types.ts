@@ -160,10 +160,19 @@ export interface RunStats {
   totalKills: number;
   totalGoldEarned: number;
   totalDamageDealt: number;
+  /**
+   * Damage dealt per team slot index (six entries, parallel to `team`).
+   * NOTE: `number[6]` is not valid TS; a length-6 array carries the intent.
+   */
+  damagePerSlot: number[];
   /** Slot index (0..5) with highest damage contribution; -1 until set. */
   mvpSlotIndex: number;
   floorReached: number;
   durationSec: number;
+  /** Set on game over: how the run ended. */
+  defeatCause?: 'bastionDestroyed' | 'bossTimerExpired';
+  /** First type of the enemy that destroyed the bastion, when known. */
+  defeatEnemyType?: PokemonType;
 }
 
 export type BastionUpgradeId =

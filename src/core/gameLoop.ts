@@ -11,6 +11,7 @@ import { AttackPattern, PokemonType } from './types';
 import type {
   Cooldowns6,
   Enemy,
+  FloatingText,
   GameConfig,
   GameInput,
   GameState,
@@ -23,6 +24,7 @@ import type {
 import { ARENA } from '../config/arena.config';
 import {
   BASTION_BASE_HP,
+  BASTION_REGEN_FRACTION_PER_SEC,
   BOSS_TIMER_DURATION,
   CLICK_BASE_DAMAGE,
   FIXED_TIMESTEP,
@@ -53,6 +55,39 @@ const ULTIMATE_DAMAGE_MULTIPLIER = 10;
 // shortcut: ultimate charge rates, move to balance.config when specified
 const ULTIMATE_CHARGE_PER_HIT = 1;
 const ULTIMATE_CHARGE_PER_CLICK = 5;
+// shortcut: switch-in burst radius/damage, move to balance.config when specified
+const SWITCH_IN_RADIUS = 60;
+const SWITCH_IN_DAMAGE_MULTIPLIER = 2;
+/** Floating-text lifetime in seconds. */
+const FLOATING_TEXT_MAX_AGE = 1.0;
+
+/** Slot index currently flagged active, or -1 when the team is empty. */
+function activeSlotIndex(state: GameState): number {
+  return state.team.findIndex((s) => s.isActive);
+}
+
+function createFloatingText(
+  id: number,
+  x: number,
+  y: number,
+  text: string,
+  color: string,
+): FloatingText {
+  return { id, x, y, text, color, age: 0, maxAge: FLOATING_TEXT_MAX_AGE };
+}
+
+/** Highest-damage slot index, or -1 when no slot has dealt damage. */
+function mvpSlotOf(damagePerSlot: readonly number[]): number {
+  let best = -1;
+  let bestDamage = 0;
+  for (let i = 0; i < damagePerSlot.length; i++) {
+    if (damagePerSlot[i] > bestDamage) {
+      bestDamage = damagePerSlot[i];
+      best = i;
+    }
+  }
+  return best;
+}
 
 /** Projectile travel speed (px/s) per attack pattern. */
 const PROJECTILE_SPEED: Record<AttackPattern, number> = {
@@ -254,6 +289,7 @@ function startRun(state: GameState, starterId: string, config: GameConfig, rng: 
       totalKills: 0,
       totalGoldEarned: 0,
       totalDamageDealt: 0,
+      damagePerSlot: [0, 0, 0, 0, 0, 0],
       mvpSlotIndex: -1,
       floorReached: 1,
       durationSec: 0,
@@ -261,7 +297,12 @@ function startRun(state: GameState, starterId: string, config: GameConfig, rng: 
   };
 }
 
-function applyHotSwap(state: GameState, index: number): GameState {
+function applyHotSwap(
+  state: GameState,
+  index: number,
+  config: GameConfig,
+  rng: () => number,
+): GameState {
   if (index < 0 || index > 5) return state;
   const slot = state.team[index];
   if (!slot.pokemon || slot.isActive) return state;
@@ -276,13 +317,60 @@ function applyHotSwap(state: GameState, index: number): GameState {
     hotSwapCooldownSec: cooldowns[i],
   })) as Team6;
 
-  return {
+  let next: GameState = {
     ...state,
     team,
     hotSwapCooldowns: cooldowns,
     ultimateMax: slot.pokemon.ultimateMax,
     ultimateCharge: Math.min(state.ultimateCharge, slot.pokemon.ultimateMax),
   };
+
+  // Switch-in bonus: the incoming Pokémon detonates a radial burst on arrival.
+  const incoming = slot.pokemon;
+  const attacker = attackerOf(incoming, incoming.types);
+  const baseDmg = incoming.atk * SWITCH_IN_DAMAGE_MULTIPLIER;
+  const enemies = next.enemies.map((e) => ({ ...e }));
+  const damagePerSlot = [...next.runStats.damagePerSlot];
+  const floatingTexts = [...next.floatingTexts];
+  let nextTextId = maxEntityId(next) + 1;
+  let gold = next.gold;
+  let totalKills = next.runStats.totalKills;
+  let totalGold = next.runStats.totalGoldEarned;
+  let totalDamage = next.runStats.totalDamageDealt;
+  let remaining = next.waveEnemiesRemaining;
+
+  for (const enemy of enemies) {
+    if (!enemy.alive) continue;
+    const dx = enemy.x - ARENA.CENTER;
+    const dy = enemy.y - ARENA.CENTER;
+    if (dx * dx + dy * dy > SWITCH_IN_RADIUS * SWITCH_IN_RADIUS) continue;
+    const outcome = hitEnemy(enemy, baseDmg, attacker, next, rng, config);
+    totalDamage += outcome.amount;
+    damagePerSlot[index] += outcome.amount;
+    if (outcome.killed) {
+      totalKills += 1;
+      gold += outcome.goldGained;
+      totalGold += outcome.goldGained;
+      remaining = Math.max(0, remaining - 1);
+    }
+    floatingTexts.push(createFloatingText(nextTextId++, enemy.x, enemy.y, `${outcome.amount}`, '#ffd166'));
+  }
+
+  next = {
+    ...next,
+    enemies: enemies.filter((e) => e.alive),
+    gold,
+    waveEnemiesRemaining: remaining,
+    floatingTexts,
+    runStats: {
+      ...next.runStats,
+      totalKills,
+      totalGoldEarned: totalGold,
+      totalDamageDealt: totalDamage,
+      damagePerSlot,
+    },
+  };
+  return next;
 }
 
 function applyClick(
@@ -294,11 +382,15 @@ function applyClick(
   const active = getActive(state);
   if (!active) return state;
 
+  const slotIndex = activeSlotIndex(state);
   const radius = clickRadius(state.bastionUpgrades);
   const baseDmg = CLICK_BASE_DAMAGE * clickDamageMultiplier(state.bastionUpgrades);
   const attacker = attackerOf(active, active.types);
 
   const enemies = state.enemies.map((e) => ({ ...e }));
+  const damagePerSlot = [...state.runStats.damagePerSlot];
+  const floatingTexts = [...state.floatingTexts];
+  let nextTextId = maxEntityId(state) + 1;
   let gold = state.gold;
   let totalKills = state.runStats.totalKills;
   let totalGold = state.runStats.totalGoldEarned;
@@ -314,11 +406,14 @@ function applyClick(
     hit = true;
     const outcome = hitEnemy(enemy, baseDmg, attacker, state, rng, config);
     totalDamage += outcome.amount;
+    damagePerSlot[slotIndex] += outcome.amount;
+    floatingTexts.push(createFloatingText(nextTextId++, enemy.x, enemy.y, `${outcome.amount}`, '#ffffff'));
     if (outcome.killed) {
       totalKills += 1;
       gold += outcome.goldGained;
       totalGold += outcome.goldGained;
       remaining = Math.max(0, remaining - 1);
+      floatingTexts.push(createFloatingText(nextTextId++, enemy.x, enemy.y, `+${outcome.goldGained}`, '#ffd700'));
     }
   }
 
@@ -327,6 +422,7 @@ function applyClick(
     enemies: enemies.filter((e) => e.alive),
     gold,
     waveEnemiesRemaining: remaining,
+    floatingTexts,
     ultimateCharge: hit
       ? Math.min(state.ultimateMax, state.ultimateCharge + ULTIMATE_CHARGE_PER_CLICK)
       : state.ultimateCharge,
@@ -335,6 +431,7 @@ function applyClick(
       totalKills,
       totalGoldEarned: totalGold,
       totalDamageDealt: totalDamage,
+      damagePerSlot,
     },
   };
 }
@@ -343,9 +440,13 @@ function applyUltimate(state: GameState, config: GameConfig, rng: () => number):
   const active = getActive(state);
   if (!active || state.ultimateCharge < state.ultimateMax) return state;
 
+  const slotIndex = activeSlotIndex(state);
   const attacker = attackerOf(active, active.types);
   const baseDmg = PROJECTILE_BASE_DAMAGE * ULTIMATE_DAMAGE_MULTIPLIER;
   const enemies = state.enemies.map((e) => ({ ...e }));
+  const damagePerSlot = [...state.runStats.damagePerSlot];
+  const floatingTexts = [...state.floatingTexts];
+  let nextTextId = maxEntityId(state) + 1;
   let gold = state.gold;
   let totalKills = state.runStats.totalKills;
   let totalGold = state.runStats.totalGoldEarned;
@@ -356,11 +457,14 @@ function applyUltimate(state: GameState, config: GameConfig, rng: () => number):
     if (!enemy.alive) continue;
     const outcome = hitEnemy(enemy, baseDmg, attacker, state, rng, config);
     totalDamage += outcome.amount;
+    damagePerSlot[slotIndex] += outcome.amount;
+    floatingTexts.push(createFloatingText(nextTextId++, enemy.x, enemy.y, `${outcome.amount}`, '#c084fc'));
     if (outcome.killed) {
       totalKills += 1;
       gold += outcome.goldGained;
       totalGold += outcome.goldGained;
       remaining = Math.max(0, remaining - 1);
+      floatingTexts.push(createFloatingText(nextTextId++, enemy.x, enemy.y, `+${outcome.goldGained}`, '#ffd700'));
     }
   }
 
@@ -369,12 +473,14 @@ function applyUltimate(state: GameState, config: GameConfig, rng: () => number):
     enemies: enemies.filter((e) => e.alive),
     gold,
     waveEnemiesRemaining: remaining,
+    floatingTexts,
     ultimateCharge: 0,
     runStats: {
       ...state.runStats,
       totalKills,
       totalGoldEarned: totalGold,
       totalDamageDealt: totalDamage,
+      damagePerSlot,
     },
   };
 }
@@ -394,7 +500,8 @@ function applyInput(
   let next = state;
   if (input.buyTeamLevel) next = upgradeTeamLevel(next);
   if (input.buyUpgrade) next = purchaseUpgrade(next, input.buyUpgrade);
-  if (typeof input.hotSwapIndex === 'number') next = applyHotSwap(next, input.hotSwapIndex);
+  if (typeof input.hotSwapIndex === 'number')
+    next = applyHotSwap(next, input.hotSwapIndex, config, rng);
   if (input.click) next = applyClick(next, input.click, config, rng);
   if (input.useUltimate) next = applyUltimate(next, config, rng);
   return next;
@@ -412,6 +519,14 @@ function stepOnce(state: GameState, config: GameConfig, rng: () => number): Game
     hitIds: p.hitIds ? [...p.hitIds] : undefined,
   }));
   const hotSwapCooldowns = state.hotSwapCooldowns.map((c) => Math.max(0, c - dt)) as Cooldowns6;
+  const damagePerSlot = [...state.runStats.damagePerSlot];
+  const slotIndex = activeSlotIndex(state);
+  // Age then drop expired floating texts so the array cannot grow unbounded.
+  const floatingTexts: FloatingText[] = state.floatingTexts
+    .map((t) => ({ ...t, age: t.age + dt }))
+    .filter((t) => t.age < t.maxAge);
+  let nextTextId = maxEntityId(state) + 1;
+  let lastLeakerType: PokemonType | undefined;
 
   let bastionHp = state.bastionHp;
   let gold = state.gold;
@@ -431,14 +546,26 @@ function stepOnce(state: GameState, config: GameConfig, rng: () => number): Game
     const d = Math.hypot(dx, dy);
     if (d <= ARENA.BASTION_DAMAGE_R) {
       bastionHp -= ENEMY_CONTACT_DAMAGE;
+      lastLeakerType = enemy.types[0];
       enemy.alive = false;
       enemy.hp = 0;
       waveEnemiesRemaining = Math.max(0, waveEnemiesRemaining - 1);
+      floatingTexts.push(
+        createFloatingText(nextTextId++, enemy.x, enemy.y, `-${ENEMY_CONTACT_DAMAGE}`, '#ff4444'),
+      );
       continue;
     }
     const move = Math.min(d, enemy.speed * dt);
     enemy.x += (dx / d) * move;
     enemy.y += (dy / d) * move;
+  }
+
+  // Bastion passive regeneration (PRD §4.1); skipped once destroyed.
+  if (bastionHp > 0) {
+    bastionHp = Math.min(
+      state.bastionMaxHp,
+      bastionHp + state.bastionMaxHp * BASTION_REGEN_FRACTION_PER_SEC * dt,
+    );
   }
 
   // 2. Auto-fire.
@@ -463,6 +590,10 @@ function stepOnce(state: GameState, config: GameConfig, rng: () => number): Game
 
       const outcome = hitEnemy(enemy, p.damage, attackerOf(active, p.types), state, rng, config);
       totalDamage += outcome.amount;
+      if (slotIndex >= 0) damagePerSlot[slotIndex] += outcome.amount;
+      floatingTexts.push(
+        createFloatingText(nextTextId++, enemy.x, enemy.y, `${outcome.amount}`, '#ffffff'),
+      );
       if (outcome.amount > 0) {
         ultimateCharge = Math.min(state.ultimateMax, ultimateCharge + ULTIMATE_CHARGE_PER_HIT);
       }
@@ -471,6 +602,9 @@ function stepOnce(state: GameState, config: GameConfig, rng: () => number): Game
         gold += outcome.goldGained;
         totalGold += outcome.goldGained;
         waveEnemiesRemaining = Math.max(0, waveEnemiesRemaining - 1);
+        floatingTexts.push(
+          createFloatingText(nextTextId++, enemy.x, enemy.y, `+${outcome.goldGained}`, '#ffd700'),
+        );
       }
       p.hitIds = [...(p.hitIds ?? []), enemy.id];
 
@@ -503,6 +637,7 @@ function stepOnce(state: GameState, config: GameConfig, rng: () => number): Game
     totalKills,
     totalGoldEarned: totalGold,
     totalDamageDealt: totalDamage,
+    damagePerSlot,
     durationSec: state.runStats.durationSec + dt,
     floorReached: Math.max(state.runStats.floorReached, floor),
   };
@@ -510,12 +645,14 @@ function stepOnce(state: GameState, config: GameConfig, rng: () => number): Game
 
   // 5. Game over: bastion destroyed or a boss outlived its timer.
   if (bastionHp <= 0 || (boss && bossTimerSec !== undefined && bossTimerSec <= 0)) {
+    const bastionDestroyed = bastionHp <= 0;
     return {
       ...state,
       phase: 'GAME_OVER',
       floor,
       enemies: aliveEnemies,
       projectiles: liveProjectiles,
+      floatingTexts,
       bastionHp: Math.max(0, bastionHp),
       gold,
       bossTimerSec,
@@ -523,7 +660,12 @@ function stepOnce(state: GameState, config: GameConfig, rng: () => number): Game
       waveEnemiesRemaining,
       hotSwapCooldowns,
       team,
-      runStats,
+      runStats: {
+        ...runStats,
+        mvpSlotIndex: mvpSlotOf(damagePerSlot),
+        defeatCause: bastionDestroyed ? 'bastionDestroyed' : 'bossTimerExpired',
+        defeatEnemyType: bastionDestroyed ? lastLeakerType : undefined,
+      },
     };
   }
 
@@ -543,6 +685,7 @@ function stepOnce(state: GameState, config: GameConfig, rng: () => number): Game
     floor,
     enemies: finalEnemies,
     projectiles: liveProjectiles,
+    floatingTexts,
     bastionHp: Math.max(0, bastionHp),
     gold,
     bossTimerSec,

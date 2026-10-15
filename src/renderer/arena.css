@@ -2,6 +2,7 @@
   aspect-ratio: 1 / 1;
   width: 100%;
   max-width: 384px;
+  max-height: min(384px, calc(100vh - 2rem));
   position: relative;
   image-rendering: pixelated;
   image-rendering: crisp-edges;
