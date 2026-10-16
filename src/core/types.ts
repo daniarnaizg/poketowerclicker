@@ -66,7 +66,8 @@ export interface PokemonDefinition {
   pattern: AttackPattern;
   /** Canonical evolution: triggers when unified Team Level >= canonicalLevel. */
   evolution?: { targetId: string; canonicalLevel: number };
-  ultimate: { id: string; name: string; energyCost: number };
+  /** Signature move; cooldownSec is the charge time in seconds (see gameLoop). */
+  ultimate: { id: string; name: string; cooldownSec: number };
   /** BENCH_PASSIVE: stat key + fractional bonus (0.08 = +8%). */
   benchPassive: { stat: string; value: number };
 }
@@ -93,10 +94,54 @@ export interface PlayerPokemon extends Entity {
   critRate: number;
   critDmg: number;
   pattern: AttackPattern;
+  /** Seconds accumulated toward the ultimate (0..ultimateMax). */
   ultimateEnergy: number;
+  /** Ultimate cooldown in seconds. */
   ultimateMax: number;
   /** 0 = base form, 1 = first evolution, 2 = final evolution. */
   evolutionStage: number;
+  /**
+   * Awakening rank 1..5 (PRD §3.1), copied from the collection at run start.
+   * Optional: undefined is treated as 1★.
+   * 5★ = Aura Apex (golden aura + doubled bench passive).
+   */
+  stars?: number;
+  /** Shiny collectible flag (Phase 3C); always false in Phase 2. */
+  shinyActive?: boolean;
+}
+
+export type EnemyKind = 'normal' | 'miniboss' | 'grandboss' | 'runner' | 'shiny';
+
+export interface EnemyDefinition {
+  /** Pokedex number as zero-padded string, e.g. "0019". */
+  id: string;
+  name: string;
+  types: [PokemonType] | [PokemonType, PokemonType];
+  hpFactor?: number;
+  speedFactor?: number;
+}
+
+export type BiomeId = 'RUTA_VERDE' | 'CUEVA_UMBRIA' | 'MONTE_IGNEO' | 'COSTA_RUINAS';
+
+export interface BiomePalette {
+  groundA: string;
+  groundB: string;
+  accent: string;
+  pageBg: string;
+  pageGrid: string;
+  frameAccent: string;
+}
+
+export interface BiomeDefinition {
+  id: BiomeId;
+  name: string;
+  floors: [number, number];
+  typeWeights: Partial<Record<PokemonType, number>>;
+  wild: string[];
+  miniBosses: Record<number, string>;
+  grandBosses?: Record<number, string>;
+  runners: string[];
+  palette: BiomePalette;
 }
 
 export interface Enemy extends Entity {
@@ -109,6 +154,38 @@ export interface Enemy extends Entity {
   bossTimerSec?: number;
   /** Species id for sprite lookup / boss identity. */
   definitionId: string;
+  /** Active status ailments (Phase 2); absent when the enemy is clean. */
+  statuses?: StatusInstance[];
+  /** Phase 3A: enemy category. */
+  kind?: EnemyKind;
+  /** Phase 3A (D1): true once a boss reaches the bastion perimeter and anchors there. */
+  anchoredAtBastion?: boolean;
+  /** Phase 3A (D1): seconds until next periodic boss strike while anchored. */
+  bossAttackCooldownSec?: number;
+  /** Phase 3C prep: special flags (e.g. typeless for loot runners). */
+  flags?: { typeless?: boolean };
+  /** Phase 3C prep: remaining lifetime for runners. */
+  lifetimeSec?: number;
+  /** Phase 3B prep: current boss phase index. */
+  phaseIndex?: number;
+}
+
+/** Status ailments applied by 3★ Switch-In bonuses and some ultimates. */
+export type StatusKind = 'BURN' | 'PARALYZE' | 'SLOW';
+/** Switch-In bonus effect: a status on enemies, or a temporary bastion shield. */
+export type SwitchInEffect = StatusKind | 'SHIELD';
+
+/** One active ailment on an enemy. */
+export interface StatusInstance {
+  /** 'BURN' | 'PARALYZE' | 'SLOW' (3B adds 'POISON', 'FREEZE'). */
+  id: string;
+  remainingSec: number;
+  /** Unused in Phase 2; data prep for 3B synergies. */
+  stacks?: number;
+  /** Team slot credited with the damage/kills. */
+  sourceSlot?: number;
+  /** BURN only: damage/sec = fraction of the triggering hit. */
+  dps?: number;
 }
 
 export interface Projectile {
@@ -126,6 +203,8 @@ export interface Projectile {
   bounce?: number;
   /** Enemy ids already hit by this projectile (prevents double-hits). */
   hitIds?: number[];
+  /** AOE pattern: radius (px) of the explosion around the impacted enemy. */
+  splashRadius?: number;
 }
 
 export interface FloatingText {
@@ -173,6 +252,12 @@ export interface RunStats {
   defeatCause?: 'bastionDestroyed' | 'bossTimerExpired';
   /** First type of the enemy that destroyed the bastion, when known. */
   defeatEnemyType?: PokemonType;
+  /** Phase 3A (I2): boss floors where the boss was actually killed (hp <= 0). */
+  defeatedBossFloors?: number[];
+  /** Phase 3A (§6.3): manual clicks fired by the player. */
+  manualClicks?: number;
+  /** Phase 3A (§6.3): automatic clicks fired by UP_AUTOCLICK. */
+  autoClicks?: number;
 }
 
 export type BastionUpgradeId =
@@ -183,7 +268,9 @@ export type BastionUpgradeId =
   | 'UP_SPD'
   | 'UP_CRIT'
   | 'UP_CDMG'
-  | 'UP_GOLD';
+  | 'UP_GOLD'
+  | 'UP_WALL'
+  | 'UP_AUTOCLICK';
 
 export const BASTION_UPGRADE_IDS: readonly BastionUpgradeId[] = [
   'UP_CLICK',
@@ -194,12 +281,20 @@ export const BASTION_UPGRADE_IDS: readonly BastionUpgradeId[] = [
   'UP_CRIT',
   'UP_CDMG',
   'UP_GOLD',
+  'UP_WALL',
+  'UP_AUTOCLICK',
 ] as const;
 
-/** Level of each upgrade (0 = not purchased). */
-export type BastionUpgrades = Record<BastionUpgradeId, number>;
+/** Level of each upgrade (0 = not purchased; UP_AUTOCLICK optional for backward compat in tests). */
+export type BastionUpgrades = Record<Exclude<BastionUpgradeId, 'UP_AUTOCLICK'>, number> & {
+  UP_AUTOCLICK?: number;
+};
 
-export type GamePhase = 'STARTER_SELECT' | 'PLAYING' | 'GAME_OVER';
+/**
+ * STARTER_SELECT: first launch only. MENU: between runs (Santuario / Caja).
+ * Both accept `startRun` / `selectStarter` input; only PLAYING simulates.
+ */
+export type GamePhase = 'STARTER_SELECT' | 'MENU' | 'PLAYING' | 'GAME_OVER';
 
 export type Team6 = [TeamSlot, TeamSlot, TeamSlot, TeamSlot, TeamSlot, TeamSlot];
 export type Cooldowns6 = [number, number, number, number, number, number];
@@ -221,14 +316,45 @@ export interface GameState {
   floatingTexts: FloatingText[];
   /** Remaining boss kill-timer; undefined when no boss is active. */
   bossTimerSec?: number;
-  /** Ultimate charge of the ACTIVE Pokémon mirrored at run level (0..ultimateMax). */
+  /** Ultimate charge of the ACTIVE Pokémon mirrored at run level (seconds, 0..ultimateMax). */
   ultimateCharge: number;
+  /** Ultimate cooldown in seconds (mirror of the active Pokémon's). */
   ultimateMax: number;
-  /** Enemies still to spawn/kill in the current wave. */
+  /** Enemies still to spawn/kill in the current wave (0 during the inter-wave break). */
   waveEnemiesRemaining: number;
+  /** Auto-advance to the next floor after the breather; undefined = true. */
+  autoAdvanceWave?: boolean;
+  /** Seconds left on the inter-wave breather; undefined when none is running. */
+  interWaveTimerSec?: number;
+  /** true when the floor is cleared with auto-advance off (waiting for the player). */
+  awaitingNextWave?: boolean;
   /** Canonical hot-swap cooldowns per slot index, seconds remaining. */
   hotSwapCooldowns: Cooldowns6;
   runStats: RunStats;
+  /** Seconds of remaining bastion shield (3★ Switch-In); blocks contact damage. */
+  bastionShieldSec?: number;
+  /** Short-lived visual cues (ultimates, switch-in rings) consumed by the renderer. */
+  effects?: VisualEffect[];
+}
+
+/** Purely cosmetic effect; the core ages and expires it like floating text. */
+export interface VisualEffect {
+  id: number;
+  kind: 'BEAM' | 'NOVA' | 'FLASH' | 'RING';
+  /** Origin (arena logical px). */
+  x: number;
+  y: number;
+  /** BEAM end point. */
+  x2?: number;
+  y2?: number;
+  /** NOVA / RING final radius. */
+  radius?: number;
+  /** Beam width (px). */
+  width?: number;
+  /** Primary elemental type; the renderer maps it to a color. */
+  type: PokemonType;
+  age: number;
+  maxAge: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -260,7 +386,7 @@ export interface GameConfig {
 
 export interface GameInput {
   /** Arena click at logical coords (384x384 space). */
-  click?: { x: number; y: number };
+  click?: { x: number; y: number; isAuto?: boolean };
   /** Hot-swap to slot index 0..5. */
   hotSwapIndex?: number;
   /** Fire the active Pokémon's ultimate (Space). */
@@ -269,6 +395,53 @@ export interface GameInput {
   buyUpgrade?: BastionUpgradeId;
   /** Purchase one Team Level (gold). */
   buyTeamLevel?: boolean;
-  /** Starter selection (only valid in STARTER_SELECT phase). */
+  /** Spawn the next floor now (skips the breather / the manual wait). */
+  startNextWave?: boolean;
+  /** Turn the automatic inter-wave advance on or off. */
+  setAutoAdvance?: boolean;
+  /** Starter selection (only valid in STARTER_SELECT / MENU phase). Starts a 1-Pokémon run. */
   selectStarter?: string;
+  /**
+   * Start a run with a 6-slot loadout (null = empty slot). Valid in
+   * STARTER_SELECT / MENU. The first filled slot becomes the active Pokémon.
+   */
+  startRun?: (LoadoutEntry | null)[];
+}
+
+// ---------------------------------------------------------------------------
+// Gacha / collection contracts (Phase 2, PRD §3.1)
+// ---------------------------------------------------------------------------
+
+/** Gacha rarity tiers: COMMON ★, RARE ★★, EPIC ★★★, LEGENDARY ★★★★. */
+export type Rarity = 'COMMON' | 'RARE' | 'EPIC' | 'LEGENDARY';
+export const RARITIES: readonly Rarity[] = ['COMMON', 'RARE', 'EPIC', 'LEGENDARY'] as const;
+
+/** One team slot as handed to the core at run start. */
+export interface LoadoutEntry {
+  /** Base-form species id of the line (the run evolves it via Team Level). */
+  definitionId: string;
+  /** Awakening rank 1..5. */
+  stars: number;
+  /** Shiny collectible flag (Phase 3C); always false in Phase 2. */
+  shinyActive?: boolean;
+}
+
+// ---------------------------------------------------------------------------
+// Ultimates (Phase 2, PRD §3.2)
+// ---------------------------------------------------------------------------
+
+/**
+ * ARENA: hits every enemy. NOVA: burst around the bastion (radius = size).
+ * BEAM: piercing line toward the nearest enemy (half-width = size).
+ */
+export type UltimateShape = 'ARENA' | 'NOVA' | 'BEAM';
+
+export interface UltimateDef {
+  shape: UltimateShape;
+  /** Multiplier over PROJECTILE_BASE_DAMAGE. */
+  power: number;
+  /** NOVA radius / BEAM half-width, logical px. */
+  size?: number;
+  /** Ailment applied to every enemy hit. */
+  status?: StatusKind;
 }

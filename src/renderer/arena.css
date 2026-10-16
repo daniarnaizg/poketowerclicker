@@ -16,9 +16,9 @@
   position: relative;
   image-rendering: pixelated;
   image-rendering: crisp-edges;
-  /* Marco pixel-art: borde oscuro + filo crema + borde oscuro exterior */
+  /* Marco pixel-art: borde oscuro + filo crema/acento bioma + borde oscuro exterior */
   border: 6px solid #303030;
-  box-shadow: 0 0 0 6px #f8f8f0, 0 0 0 10px #303030;
+  box-shadow: 0 0 0 6px var(--frame-accent, #f8f8f0), 0 0 0 10px #303030;
 }
 
 .arena-container canvas {

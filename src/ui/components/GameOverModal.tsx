@@ -6,11 +6,14 @@ import { runePayout } from '../../config/balance.config';
 import { POKEDEX } from '../../data/pokemon';
 import { portraitUrl } from '../pokeAssets';
 import type { RunStats, Team6 } from '../../core/types';
+import type { RunRewards } from '../../core/meta';
 
 interface Props {
   runStats: RunStats;
   /** Final team; used to resolve the MVP slot to a Pokémon name. */
   team: Team6;
+  /** Seals earned this run (Phase 2); null until settled. */
+  rewards?: RunRewards | null;
   onRestart: () => void;
 }
 
@@ -40,7 +43,7 @@ function Stat({ label, value }: { label: string; value: string | number }) {
   );
 }
 
-export function GameOverModal({ runStats, team, onRestart }: Props) {
+export function GameOverModal({ runStats, team, rewards, onRestart }: Props) {
   const runes = runePayout(runStats.floorReached);
   const mvpPokemon = runStats.mvpSlotIndex >= 0 ? team[runStats.mvpSlotIndex]?.pokemon : null;
   const mvp = mvpPokemon
@@ -80,8 +83,21 @@ export function GameOverModal({ runStats, team, onRestart }: Props) {
           RUNAS GANADAS
           <div class="pk-num text-4xl text-[#803080]">{runes}</div>
         </div>
+        {rewards && (
+          <div class="mt-3 pk-dark p-3 text-center text-[10px] leading-loose" data-testid="rewards">
+            SELLOS GANADOS
+            <div class="pk-num flex items-center justify-center gap-2 text-3xl text-[#ffd860]">
+              <span class="pk-ball pk-ball-gold" /> +{rewards.sealsTotal}
+            </div>
+            <div class="text-[8px] text-[#a8c0e0]">
+              Ascensión +{rewards.sealsAscension}
+              {rewards.sealsFirstClear > 0 && ` · Primera victoria (piso ${rewards.firstClearFloors.join(', ')}) +${rewards.sealsFirstClear}`}
+              {rewards.newBestFloor && ' · ¡NUEVO RÉCORD!'}
+            </div>
+          </div>
+        )}
         <button type="button" onClick={onRestart} class="pk-btn mt-4 w-full bg-[#e03828] px-4 py-3 text-sm text-white enabled:hover:bg-[#f05848]">
-          NUEVA PARTIDA
+          VOLVER A LA BASE
         </button>
       </div>
     </div>

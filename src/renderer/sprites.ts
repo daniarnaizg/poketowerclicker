@@ -11,7 +11,9 @@
 import { PokemonType } from '../core/types';
 import type { Enemy } from '../core/types';
 
-const SPRITE_BASE = 'https://raw.githubusercontent.com/PMDCollab/SpriteCollab/master/sprite';
+export const REMOTE_SPRITE_BASE = 'https://raw.githubusercontent.com/PMDCollab/SpriteCollab/master/sprite';
+export const LOCAL_SPRITE_BASE = '/sprites';
+export let SPRITE_BASE = LOCAL_SPRITE_BASE;
 const TICK_MS = 1000 / 60; // las duraciones de AnimData están en ticks de 1/60 s
 
 export type AnimName = 'walk' | 'idle' | 'attack';
@@ -28,11 +30,20 @@ type SpriteSet = Partial<Record<AnimName, AnimInfo>> & { walk: AnimInfo };
 
 const cache = new Map<string, SpriteSet | 'loading' | 'error'>();
 
-function loadImage(url: string): Promise<HTMLImageElement> {
+function loadImage(url: string, fallbackUrl?: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.onload = () => resolve(img);
-    img.onerror = () => reject(new Error(`sprite: ${url}`));
+    img.onerror = () => {
+      if (fallbackUrl && fallbackUrl !== url) {
+        const fb = new Image();
+        fb.onload = () => resolve(fb);
+        fb.onerror = () => reject(new Error(`sprite fallback failed: ${fallbackUrl}`));
+        fb.src = fallbackUrl;
+      } else {
+        reject(new Error(`sprite: ${url}`));
+      }
+    };
     img.src = url;
   });
 }
@@ -40,9 +51,31 @@ function loadImage(url: string): Promise<HTMLImageElement> {
 interface RawAnim { fw: number; fh: number; durs: number[]; copyOf?: string }
 
 async function loadSet(id: string): Promise<SpriteSet> {
-  const res = await fetch(`${SPRITE_BASE}/${id}/AnimData.xml`);
-  if (!res.ok) throw new Error(`AnimData ${id}`);
-  const doc = new DOMParser().parseFromString(await res.text(), 'text/xml');
+  let xmlText: string | null = null;
+  let activeBase = LOCAL_SPRITE_BASE;
+
+  // Try local /sprites first
+  try {
+    const localRes = await fetch(`${LOCAL_SPRITE_BASE}/${id}/AnimData.xml`);
+    if (localRes.ok) {
+      xmlText = await localRes.text();
+      activeBase = LOCAL_SPRITE_BASE;
+      SPRITE_BASE = LOCAL_SPRITE_BASE;
+    }
+  } catch {
+    // Local not available or offline; proceed to remote fallback
+  }
+
+  // Graceful fallback to remote SpriteCollab repository
+  if (!xmlText) {
+    const remoteRes = await fetch(`${REMOTE_SPRITE_BASE}/${id}/AnimData.xml`);
+    if (!remoteRes.ok) throw new Error(`AnimData ${id}`);
+    xmlText = await remoteRes.text();
+    activeBase = REMOTE_SPRITE_BASE;
+    SPRITE_BASE = REMOTE_SPRITE_BASE;
+  }
+
+  const doc = new DOMParser().parseFromString(xmlText, 'text/xml');
 
   const raw = new Map<string, RawAnim>();
   for (const a of Array.from(doc.querySelectorAll('Anims > Anim'))) {
@@ -67,11 +100,19 @@ async function loadSet(id: string): Promise<SpriteSet> {
   const build = async (name: string): Promise<AnimInfo | undefined> => {
     const r = resolve(name);
     if (!r) return undefined;
-    if (!images.has(r.file)) images.set(r.file, loadImage(`${SPRITE_BASE}/${id}/${r.file}-Anim.png`));
+    if (!images.has(r.file)) {
+      const primaryUrl = `${activeBase}/${id}/${r.file}-Anim.png`;
+      const fallbackUrl =
+        activeBase !== REMOTE_SPRITE_BASE ? `${REMOTE_SPRITE_BASE}/${id}/${r.file}-Anim.png` : undefined;
+      images.set(r.file, loadImage(primaryUrl, fallbackUrl));
+    }
     const img = await images.get(r.file)!;
     const total = r.a.durs.reduce((s, d) => s + d, 0) * TICK_MS;
     return {
-      img, fw: r.a.fw, fh: r.a.fh, durs: r.a.durs,
+      img,
+      fw: r.a.fw,
+      fh: r.a.fh,
+      durs: r.a.durs,
       rows: Math.max(1, Math.round(img.naturalHeight / r.a.fh)),
       totalMs: Math.max(1, total),
     };
@@ -129,8 +170,8 @@ export function drawSprite(
   ctx.drawImage(a.img, frame * a.fw, r * a.fh, a.fw, a.fh, Math.round(x - w / 2), Math.round(y - h / 2), w, h);
 }
 
-/* Enemigos: el core aún no asigna especie (definitionId 'WILD'/'BOSS'), así que el
- * renderer elige una por tipo primario. Cuando el core la asigne, usar enemy.definitionId. */
+/* Enemigos: si definitionId es un id de 4 dígitos (p.ej. '0019', '0094'), se usa directamente.
+ * Solo si definitionId es 'WILD' o 'BOSS' (o fallback), se selecciona especie por tipo primario. */
 const T = PokemonType;
 const WILD_BY_TYPE: Record<PokemonType, string> = {
   [T.Normal]: '0019', [T.Fire]: '0058', [T.Water]: '0054', [T.Grass]: '0043',
@@ -148,5 +189,8 @@ const BOSS_BY_TYPE: Record<PokemonType, string> = {
 };
 
 export function speciesForEnemy(e: Enemy): string {
+  if (e.definitionId && /^\d{4}$/.test(e.definitionId)) {
+    return e.definitionId;
+  }
   return (e.isBoss ? BOSS_BY_TYPE : WILD_BY_TYPE)[e.types[0]];
 }

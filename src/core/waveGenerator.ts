@@ -1,60 +1,68 @@
 /**
- * PokéBastion — 360° radial wave generation.
+ * PokéBastion — 360° radial wave generation with data-driven biomes & enemies (PRD §9.1.2–9.1.3).
  * PURE TYPESCRIPT: no DOM / browser imports. Deterministic: every random
  * decision is drawn from the injected `rng` (() => number in [0,1)).
  */
 
-import { PokemonType } from './types';
-import type { Enemy } from './types';
+import type { Enemy, EnemyKind } from './types';
 import { ARENA } from '../config/arena.config';
 import {
   BIG_BOSS_FLOORS,
   BOSS_HP_MULTIPLIER,
-  BOSS_TIMER_DURATION,
   MINIBOSS_INTERVAL,
   WAVE_ENEMY_COUNT_BASE,
+  bossTimerForFloor,
   enemyGoldValue,
   enemyHp,
   enemySpeed,
 } from '../config/balance.config';
+import { biomeAt } from '../data/biomes';
+import { getEnemyDef } from '../data/enemies';
 
-const ALL_TYPES: readonly PokemonType[] = Object.values(PokemonType);
-
-/** Chance a wild enemy rolls a second elemental type. */
-const DUAL_TYPE_CHANCE = 0.3;
 /** Bosses drop this many times a normal enemy's gold. */
 const BOSS_GOLD_MULTIPLIER = BOSS_HP_MULTIPLIER;
 /** Major bosses (floors 50/100) carry twice a mini-boss' HP. */
 const BIG_BOSS_HP_FACTOR = 2;
 
-function pickType(rng: () => number): PokemonType {
-  const i = Math.min(ALL_TYPES.length - 1, Math.floor(rng() * ALL_TYPES.length));
-  return ALL_TYPES[i];
-}
-
-function randomTypes(rng: () => number): [PokemonType] | [PokemonType, PokemonType] {
-  const primary = pickType(rng);
-  if (rng() < DUAL_TYPE_CHANCE) {
-    const secondary = pickType(rng);
-    if (secondary !== primary) return [primary, secondary];
-  }
-  return [primary];
-}
-
 /**
  * Spawn one enemy on the arena perimeter at `angle` (radians) and send it
- * toward the center. HP, gold and speed scale with the floor.
+ * toward the center. HP, gold, types and speed scale with the floor and enemy definition.
  */
 export function spawnEnemyAt(
   angle: number,
   floor: number,
   isBoss: boolean,
   rng: () => number,
+  speciesId?: string,
 ): Enemy {
   const radius = ARENA.CENTER;
   const x = ARENA.CENTER + Math.cos(angle) * radius;
   const y = ARENA.CENTER + Math.sin(angle) * radius;
-  const hp = Math.max(1, Math.floor(enemyHp(floor) * (isBoss ? BOSS_HP_MULTIPLIER : 1)));
+  const isBigBoss = isBoss && BIG_BOSS_FLOORS.includes(floor);
+  const biome = biomeAt(floor);
+
+  let defId = speciesId;
+  if (!defId) {
+    if (isBoss) {
+      defId = isBigBoss
+        ? (biome.grandBosses?.[floor] ?? '0150')
+        : (biome.miniBosses[floor] ?? '0127');
+    } else {
+      defId = biome.wild[Math.floor(rng() * biome.wild.length)];
+    }
+  }
+
+  const def = getEnemyDef(defId);
+  const hpFactor = def.hpFactor ?? 1;
+  const speedFactor = def.speedFactor ?? 1;
+
+  const baseHp = enemyHp(floor) * hpFactor;
+  const hp = Math.max(
+    1,
+    Math.floor(baseHp * (isBoss ? BOSS_HP_MULTIPLIER * (isBigBoss ? BIG_BOSS_HP_FACTOR : 1) : 1)),
+  );
+
+  const kind: EnemyKind = isBoss ? (isBigBoss ? 'grandboss' : 'miniboss') : 'normal';
 
   return {
     // Ids are placeholders; the game loop assigns globally-unique ids when it
@@ -65,20 +73,23 @@ export function spawnEnemyAt(
     hp,
     maxHp: hp,
     alive: true,
-    types: randomTypes(rng),
-    speed: enemySpeed(floor),
-    goldValue: Math.floor(enemyGoldValue(floor) * (isBoss ? BOSS_GOLD_MULTIPLIER : 1)),
+    types: def.types,
+    speed: enemySpeed(floor) * speedFactor,
+    goldValue: Math.floor(
+      enemyGoldValue(floor) * (isBoss ? BOSS_GOLD_MULTIPLIER * (isBigBoss ? BIG_BOSS_HP_FACTOR : 1) : 1),
+    ),
     isBoss,
-    bossTimerSec: isBoss ? BOSS_TIMER_DURATION : undefined,
-    definitionId: isBoss ? 'BOSS' : 'WILD',
+    bossTimerSec: isBoss ? bossTimerForFloor(floor) : undefined,
+    definitionId: def.id,
+    kind,
   };
 }
 
 /**
  * Build the wave for a floor:
- * - major boss (floors in BIG_BOSS_FLOORS): a single high-HP boss,
- * - mini-boss (every MINIBOSS_INTERVAL floors): a single boss,
- * - otherwise: WAVE_ENEMY_COUNT_BASE normal enemies at random angles.
+ * - major boss (floors in BIG_BOSS_FLOORS): a single high-HP grand boss,
+ * - mini-boss (every MINIBOSS_INTERVAL floors): a single mini-boss,
+ * - otherwise: WAVE_ENEMY_COUNT_BASE normal enemies picked from the current biome.
  */
 export function generateWave(floor: number, rng: () => number): Enemy[] {
   const isBigBoss = BIG_BOSS_FLOORS.includes(floor);
@@ -86,16 +97,17 @@ export function generateWave(floor: number, rng: () => number): Enemy[] {
 
   if (isBigBoss || isMiniBoss) {
     const boss = { ...spawnEnemyAt(rng() * Math.PI * 2, floor, true, rng), id: 1 };
-    if (isBigBoss) {
-      const hp = boss.hp * BIG_BOSS_HP_FACTOR;
-      return [{ ...boss, hp, maxHp: hp }];
-    }
     return [boss];
   }
 
+  const biome = biomeAt(floor);
   const wave: Enemy[] = [];
   for (let i = 0; i < WAVE_ENEMY_COUNT_BASE; i++) {
-    wave.push({ ...spawnEnemyAt(rng() * Math.PI * 2, floor, false, rng), id: i + 1 });
+    const speciesId = biome.wild[Math.floor(rng() * biome.wild.length)];
+    wave.push({
+      ...spawnEnemyAt(rng() * Math.PI * 2, floor, false, rng, speciesId),
+      id: i + 1,
+    });
   }
   return wave;
 }

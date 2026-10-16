@@ -11,18 +11,24 @@
 import type { BastionUpgradeId, BastionUpgrades, GameState } from './types';
 import { ARENA } from '../config/arena.config';
 import {
+  AUTOCLICK_CPS_BY_LEVEL,
+  AUTOCLICK_MAX_LEVEL,
   GOLD_PER_LEVEL,
   HP_PER_LEVEL,
   MULTI_MAX,
   SPD_PER_LEVEL,
+  WALL_HP_PER_LEVEL,
   upgradeCost,
 } from '../config/balance.config';
+
+export { AUTOCLICK_CPS_BY_LEVEL, AUTOCLICK_MAX_LEVEL };
 
 /** UP_CLICK: +10% click damage per level (PRD §4.1). */
 export const CLICK_DAMAGE_PER_LEVEL = 0.1;
 
 /** Cost of the NEXT level of an upgrade (0-based purchase). */
 export function calculateUpgradeCost(upgradeId: BastionUpgradeId, currentLevel: number): number {
+  if (upgradeId === 'UP_AUTOCLICK' && currentLevel >= AUTOCLICK_MAX_LEVEL) return Infinity;
   return upgradeCost(upgradeId, currentLevel);
 }
 
@@ -57,9 +63,10 @@ export function clickRadius(upgrades: BastionUpgrades): number {
  * the player cannot afford it.
  */
 export function purchaseUpgrade(state: GameState, upgradeId: BastionUpgradeId): GameState {
-  const level = state.bastionUpgrades[upgradeId];
+  const level = state.bastionUpgrades[upgradeId] ?? 0;
+  if (upgradeId === 'UP_AUTOCLICK' && level >= AUTOCLICK_MAX_LEVEL) return state;
   const cost = calculateUpgradeCost(upgradeId, level);
-  if (state.gold < cost) return state;
+  if (state.gold < cost || !isFinite(cost)) return state;
 
   const bastionUpgrades: BastionUpgrades = { ...state.bastionUpgrades, [upgradeId]: level + 1 };
   let bastionMaxHp = state.bastionMaxHp;
@@ -67,6 +74,10 @@ export function purchaseUpgrade(state: GameState, upgradeId: BastionUpgradeId): 
   if (upgradeId === 'UP_HP') {
     bastionMaxHp += HP_PER_LEVEL;
     bastionHp = Math.min(bastionMaxHp, bastionHp + HP_PER_LEVEL);
+  } else if (upgradeId === 'UP_WALL') {
+    const gain = Math.round(bastionMaxHp * WALL_HP_PER_LEVEL);
+    bastionMaxHp += gain;
+    bastionHp = Math.min(bastionMaxHp, bastionHp + gain);
   }
 
   return { ...state, gold: state.gold - cost, bastionUpgrades, bastionMaxHp, bastionHp };

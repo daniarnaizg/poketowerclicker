@@ -5,6 +5,10 @@
  * Every update returns a NEW GameState; the input state is never mutated.
  * The renderer/UI drive this by calling tickGame once per animation frame and
  * pushing the returned state into the store.
+ *
+ * Phase 2 additions: loadout-based run start, BENCH_PASSIVE bonuses, enemy
+ * status ailments + bastion shield, star-gated Switch-In / pattern upgrades,
+ * and data-driven ultimates (data/ultimates.ts).
  */
 
 import { AttackPattern, PokemonType } from './types';
@@ -15,25 +19,54 @@ import type {
   GameConfig,
   GameInput,
   GameState,
+  LoadoutEntry,
   PlayerPokemon,
   PokemonDefinition,
   Projectile,
+  StatusInstance,
+  StatusKind,
   Team6,
   TeamSlot,
+  VisualEffect,
 } from './types';
 import { ARENA } from '../config/arena.config';
 import {
+  AOE_SPLASH_DAMAGE_FACTOR,
+  AOE_SPLASH_RADIUS,
+  AOE_SPLASH_STAR_MULTIPLIER,
   BASTION_BASE_HP,
   BASTION_REGEN_FRACTION_PER_SEC,
+  BOSS_ANCHOR_MAX_HP_FRACTION,
+  BOSS_ANCHOR_TICK_SEC,
+  BOSS_STATUS_DURATION_FACTOR,
   BOSS_TIMER_DURATION,
+  bossTimerForFloor,
+  BURN_DPS_FACTOR,
+  CHAIN_EXTRA_BOUNCES_AT_MAX_PATTERN,
   CLICK_BASE_DAMAGE,
+  ENEMY_CONTACT_DAMAGE,
+  ENEMY_CONTACT_DAMAGE_FLOOR_SCALE,
+  ENEMY_CONTACT_MAX_HP_FRACTION,
   FIXED_TIMESTEP,
   HOT_SWAP_COOLDOWN,
+  INTER_WAVE_BREAK_SEC,
+  MAX_STARS,
   PROJECTILE_BASE_DAMAGE,
+  PULSE_PIERCE_AT_MAX_PATTERN,
+  SLOW_SPEED_FACTOR,
+  SNIPER_PIERCE_AT_MAX_PATTERN,
+  STAR_PATTERN,
+  STAR_SWITCH_IN,
+  SWITCH_IN_DAMAGE_MULTIPLIER,
+  SWITCH_IN_EFFECT_BY_TYPE,
+  SWITCH_IN_EFFECT_DURATION,
+  SWITCH_IN_RADIUS,
+  ULTIMATE_STATUS_DURATION,
 } from '../config/balance.config';
 import { calculateDamage } from './damage';
 import type { DamageAttacker } from './damage';
 import { generateWave } from './waveGenerator';
+import { rngFor } from './rng';
 import {
   attackSpeedMultiplier,
   clickDamageMultiplier,
@@ -43,23 +76,23 @@ import {
   purchaseUpgrade,
 } from './bastionUpgrades';
 import { upgradeTeamLevel } from './teamLevel';
+import { computeTeamBonuses, damageBonusMultiplier, starsOf } from './passives';
+import type { TeamBonuses } from './passives';
+import { getUltimate } from '../data/ultimates';
 
 const FIXED_STEP_MS = FIXED_TIMESTEP * 1000;
 /** Cap sub-steps per call so a long frame stall cannot spiral. */
 const MAX_STEPS_PER_TICK = 5;
 
-// shortcut: flat bastion damage when an enemy leaks, move to balance.config when specified
-const ENEMY_CONTACT_DAMAGE = 5;
-// shortcut: ultimate base damage = 10x projectile, move to balance.config when specified
-const ULTIMATE_DAMAGE_MULTIPLIER = 10;
-// shortcut: ultimate charge rates, move to balance.config when specified
-const ULTIMATE_CHARGE_PER_HIT = 1;
-const ULTIMATE_CHARGE_PER_CLICK = 5;
-// shortcut: switch-in burst radius/damage, move to balance.config when specified
-const SWITCH_IN_RADIUS = 60;
-const SWITCH_IN_DAMAGE_MULTIPLIER = 2;
 /** Floating-text lifetime in seconds. */
 const FLOATING_TEXT_MAX_AGE = 1.0;
+/** Visual-effect lifetime in seconds, by kind. */
+const EFFECT_MAX_AGE: Record<VisualEffect['kind'], number> = {
+  BEAM: 0.35,
+  NOVA: 0.5,
+  FLASH: 0.4,
+  RING: 0.45,
+};
 
 /** Slot index currently flagged active, or -1 when the team is empty. */
 function activeSlotIndex(state: GameState): number {
@@ -74,6 +107,17 @@ function createFloatingText(
   color: string,
 ): FloatingText {
   return { id, x, y, text, color, age: 0, maxAge: FLOATING_TEXT_MAX_AGE };
+}
+
+function createEffect(
+  id: number,
+  kind: VisualEffect['kind'],
+  type: PokemonType,
+  x: number,
+  y: number,
+  extra: Partial<VisualEffect> = {},
+): VisualEffect {
+  return { id, kind, type, x, y, age: 0, maxAge: EFFECT_MAX_AGE[kind], ...extra };
 }
 
 /** Highest-damage slot index, or -1 when no slot has dealt damage. */
@@ -100,6 +144,8 @@ const PROJECTILE_SPEED: Record<AttackPattern, number> = {
 const dist2ToCenter = (e: Enemy): number =>
   (e.x - ARENA.CENTER) ** 2 + (e.y - ARENA.CENTER) ** 2;
 
+const enemyHitbox = (e: Enemy): number => (e.isBoss ? ARENA.BOSS_HITBOX_R : ARENA.ENEMY_HITBOX_R);
+
 function getActive(state: GameState): PlayerPokemon | null {
   return state.team.find((slot) => slot.isActive)?.pokemon ?? null;
 }
@@ -110,6 +156,7 @@ function maxEntityId(state: GameState): number {
   for (const e of state.enemies) if (e.id > max) max = e.id;
   for (const p of state.projectiles) if (p.id > max) max = p.id;
   for (const f of state.floatingTexts) if (f.id > max) max = f.id;
+  for (const fx of state.effects ?? []) if (fx.id > max) max = fx.id;
   for (const slot of state.team) if (slot.pokemon && slot.pokemon.id > max) max = slot.pokemon.id;
   return max;
 }
@@ -123,10 +170,64 @@ function attackerOf(active: PlayerPokemon | null, types: readonly PokemonType[])
   };
 }
 
+// ---------------------------------------------------------------------------
+// Status ailments (Phase 2)
+// ---------------------------------------------------------------------------
+
+/** Apply (or refresh) an ailment on an already-cloned enemy. Bosses resist duration. */
+function applyStatus(
+  enemy: Enemy,
+  kind: StatusKind,
+  durationSec: number,
+  opts: { sourceDamage?: number; slot?: number } = {},
+): void {
+  const duration = durationSec * (enemy.isBoss ? BOSS_STATUS_DURATION_FACTOR : 1);
+  const statuses = enemy.statuses ? [...enemy.statuses] : [];
+  const i = statuses.findIndex((s) => s.id === kind);
+  if (i >= 0) {
+    const prev = statuses[i];
+    statuses[i] = {
+      ...prev,
+      remainingSec: Math.max(prev.remainingSec, duration),
+      ...(kind === 'BURN'
+        ? {
+            // Burn DPS scales with the triggering hit (PRD §9: fraction of the impact).
+            dps: Math.max(prev.dps ?? 0, (opts.sourceDamage ?? 0) * BURN_DPS_FACTOR),
+            sourceSlot: opts.slot ?? prev.sourceSlot,
+          }
+        : {}),
+    };
+  } else {
+    statuses.push(
+      kind === 'BURN'
+        ? { id: kind, remainingSec: duration, dps: (opts.sourceDamage ?? 0) * BURN_DPS_FACTOR, sourceSlot: opts.slot }
+        : { id: kind, remainingSec: duration },
+    );
+  }
+  enemy.statuses = statuses;
+}
+
+/** Status list after `dt` seconds, or undefined when nothing is left. */
+function tickStatus(statuses: readonly StatusInstance[], dt: number): StatusInstance[] | undefined {
+  const next = statuses
+    .map((s) => ({ ...s, remainingSec: s.remainingSec - dt }))
+    .filter((s) => s.remainingSec > 0);
+  return next.length > 0 ? next : undefined;
+}
+
+// ---------------------------------------------------------------------------
+// Hits
+// ---------------------------------------------------------------------------
+
 interface HitOutcome {
   amount: number;
   killed: boolean;
   goldGained: number;
+}
+
+/** Gold paid for killing `enemy` (UP_GOLD + GOLD bench passives, additive). */
+function goldFor(enemy: Enemy, state: GameState, bonuses: TeamBonuses): number {
+  return Math.floor(enemy.goldValue * (goldMultiplier(state.bastionUpgrades) + bonuses.gold));
 }
 
 /** Apply one damage instance to a (cloned) enemy and report the outcome. */
@@ -137,11 +238,12 @@ function hitEnemy(
   state: GameState,
   rng: () => number,
   config: GameConfig,
+  bonuses: TeamBonuses,
 ): HitOutcome {
   const event = calculateDamage(
-    attacker,
+    { ...attacker, critRate: attacker.critRate + bonuses.critRate },
     enemy,
-    baseDmg,
+    baseDmg * damageBonusMultiplier(bonuses, attacker.types),
     state.teamLevel,
     state.bastionUpgrades,
     rng,
@@ -154,7 +256,7 @@ function hitEnemy(
   if (enemy.alive && enemy.hp <= 0) {
     enemy.alive = false;
     killed = true;
-    goldGained = Math.floor(enemy.goldValue * goldMultiplier(state.bastionUpgrades));
+    goldGained = goldFor(enemy, state, bonuses);
   }
   return { amount: event.amount, killed, goldGained };
 }
@@ -186,6 +288,16 @@ function createProjectile(
     hitIds: [],
   };
   aimProjectile(p, target, speed);
+
+  // 4★ "Evolución del Patrón de Disparo" (PRD §3.1).
+  const evolved = starsOf(active) >= STAR_PATTERN;
+  if (active.pattern === AttackPattern.AOE) {
+    p.splashRadius = AOE_SPLASH_RADIUS * (evolved ? AOE_SPLASH_STAR_MULTIPLIER : 1);
+  } else if (active.pattern === AttackPattern.SNIPER && evolved) {
+    p.pierce = SNIPER_PIERCE_AT_MAX_PATTERN;
+  } else if (active.pattern === AttackPattern.PULSE && evolved) {
+    p.pierce = PULSE_PIERCE_AT_MAX_PATTERN;
+  }
   if (bounce > 0) p.bounce = bounce;
   return p;
 }
@@ -196,11 +308,13 @@ function fireProjectiles(
   active: PlayerPokemon,
   enemies: Enemy[],
   rng: () => number,
+  bonuses: TeamBonuses,
 ): Projectile[] {
   const living = enemies.filter((e) => e.alive);
   if (living.length === 0) return [];
 
-  const expectedShots = active.spd * attackSpeedMultiplier(state.bastionUpgrades) * FIXED_TIMESTEP;
+  const expectedShots =
+    active.spd * attackSpeedMultiplier(state.bastionUpgrades) * (1 + bonuses.attackSpeed) * FIXED_TIMESTEP;
   const whole = Math.floor(expectedShots);
   const shots = whole + (rng() < expectedShots - whole ? 1 : 0);
   if (shots <= 0) return [];
@@ -208,12 +322,14 @@ function fireProjectiles(
   const multi = projectileCount(state.bastionUpgrades);
   const targets = [...living].sort((a, b) => dist2ToCenter(a) - dist2ToCenter(b)).slice(0, multi);
   const speed = PROJECTILE_SPEED[active.pattern];
+  const chainBounces =
+    multi - 1 + (starsOf(active) >= STAR_PATTERN ? CHAIN_EXTRA_BOUNCES_AT_MAX_PATTERN : 0);
 
   let id = maxEntityId(state) + 1;
   const fired: Projectile[] = [];
   for (let s = 0; s < shots; s++) {
     if (active.pattern === AttackPattern.CHAIN) {
-      fired.push(createProjectile(id++, active, targets[0], speed, multi - 1));
+      fired.push(createProjectile(id++, active, targets[0], speed, chainBounces));
     } else {
       const count = Math.min(multi, targets.length);
       for (let t = 0; t < count; t++) fired.push(createProjectile(id++, active, targets[t], speed, 0));
@@ -222,12 +338,12 @@ function fireProjectiles(
   return fired;
 }
 
-function createPlayerPokemon(def: PokemonDefinition, id: number): PlayerPokemon {
+function createPlayerPokemon(def: PokemonDefinition, id: number, stars = 1, shinyActive = false): PlayerPokemon {
   return {
     id,
     x: ARENA.CENTER,
     y: ARENA.CENTER,
-    // shortcut: active Pokémon HP is unused in Phase 1 (bastion HP is the health bar)
+    // shortcut: active Pokémon HP is unused (bastion HP is the health bar)
     hp: 1,
     maxHp: 1,
     alive: true,
@@ -239,8 +355,10 @@ function createPlayerPokemon(def: PokemonDefinition, id: number): PlayerPokemon 
     critDmg: def.baseStats.critDmg,
     pattern: def.pattern,
     ultimateEnergy: 0,
-    ultimateMax: def.ultimate.energyCost,
+    ultimateMax: def.ultimate.cooldownSec,
     evolutionStage: 0,
+    stars: Math.max(1, Math.min(MAX_STARS, Math.floor(stars))),
+    shinyActive,
   };
 }
 
@@ -254,21 +372,36 @@ function syncCooldownMirrors(team: Team6, cooldowns: Cooldowns6): Team6 {
   ) as Team6;
 }
 
-function startRun(state: GameState, starterId: string, config: GameConfig, rng: () => number): GameState {
-  const def = config.pokedex[starterId];
-  if (!def) return state;
+/**
+ * Start a run from a 6-slot loadout. Slot positions are preserved (hotkeys 1-6);
+ * the first filled slot becomes the active Pokémon. An empty / invalid loadout
+ * leaves the state untouched.
+ */
+function startRun(
+  state: GameState,
+  loadout: readonly (LoadoutEntry | null)[],
+  config: GameConfig,
+  rng: () => number,
+): GameState {
+  const slots: TeamSlot[] = [];
+  for (let i = 0; i < 6; i++) {
+    const entry = loadout[i];
+    const def = entry ? config.pokedex[entry.definitionId] : undefined;
+    slots.push(
+      entry && def
+        ? { index: i, pokemon: createPlayerPokemon(def, i + 1, entry.stars, entry.shinyActive ?? false), isActive: false, hotSwapCooldownSec: 0 }
+        : emptySlot(i),
+    );
+  }
+  const first = slots.findIndex((s) => s.pokemon !== null);
+  if (first < 0) return state;
+  slots[first] = { ...slots[first], isActive: true };
+  const team = slots as Team6;
+  const lead = slots[first].pokemon!;
 
-  const starter = createPlayerPokemon(def, 1);
-  const team: Team6 = [
-    { index: 0, pokemon: starter, isActive: true, hotSwapCooldownSec: 0 },
-    emptySlot(1),
-    emptySlot(2),
-    emptySlot(3),
-    emptySlot(4),
-    emptySlot(5),
-  ];
   const bastionMaxHp = state.bastionMaxHp > 0 ? state.bastionMaxHp : BASTION_BASE_HP;
-  const wave = generateWave(1, rng);
+  const waveRng = config.seed !== undefined ? rngFor(config.seed, 'WAVE', 1) : rng;
+  const wave = generateWave(1, waveRng);
 
   return {
     ...state,
@@ -281,10 +414,17 @@ function startRun(state: GameState, starterId: string, config: GameConfig, rng: 
     enemies: wave,
     projectiles: [],
     waveEnemiesRemaining: wave.length,
-    bossTimerSec: wave.some((e) => e.isBoss) ? BOSS_TIMER_DURATION : undefined,
+    bossTimerSec: wave.some((e) => e.isBoss)
+      ? (wave.find((e) => e.isBoss)?.bossTimerSec ?? bossTimerForFloor(1))
+      : undefined,
     hotSwapCooldowns: [0, 0, 0, 0, 0, 0],
     ultimateCharge: 0,
-    ultimateMax: starter.ultimateMax,
+    ultimateMax: lead.ultimateMax,
+    interWaveTimerSec: undefined,
+    awaitingNextWave: false,
+    autoAdvanceWave: undefined,
+    bastionShieldSec: 0,
+    effects: [],
     runStats: {
       totalKills: 0,
       totalGoldEarned: 0,
@@ -293,6 +433,9 @@ function startRun(state: GameState, starterId: string, config: GameConfig, rng: 
       mvpSlotIndex: -1,
       floorReached: 1,
       durationSec: 0,
+      manualClicks: 0,
+      autoClicks: 0,
+      defeatedBossFloors: [],
     },
   };
 }
@@ -317,44 +460,72 @@ function applyHotSwap(
     hotSwapCooldownSec: cooldowns[i],
   })) as Team6;
 
+  // The ultimate meter keeps its fill RATIO across Pokémon (no swap penalty).
+  const ratio = state.ultimateMax > 0 ? Math.min(1, state.ultimateCharge / state.ultimateMax) : 0;
   let next: GameState = {
     ...state,
     team,
     hotSwapCooldowns: cooldowns,
     ultimateMax: slot.pokemon.ultimateMax,
-    ultimateCharge: Math.min(state.ultimateCharge, slot.pokemon.ultimateMax),
+    ultimateCharge: ratio * slot.pokemon.ultimateMax,
   };
 
   // Switch-in bonus: the incoming Pokémon detonates a radial burst on arrival.
   const incoming = slot.pokemon;
+  const bonuses = computeTeamBonuses(next.team, config.pokedex);
   const attacker = attackerOf(incoming, incoming.types);
   const baseDmg = incoming.atk * SWITCH_IN_DAMAGE_MULTIPLIER;
   const enemies = next.enemies.map((e) => ({ ...e }));
   const damagePerSlot = [...next.runStats.damagePerSlot];
   const floatingTexts = [...next.floatingTexts];
+  const effects = [...(next.effects ?? [])];
   let nextTextId = maxEntityId(next) + 1;
   let gold = next.gold;
   let totalKills = next.runStats.totalKills;
   let totalGold = next.runStats.totalGoldEarned;
   let totalDamage = next.runStats.totalDamageDealt;
   let remaining = next.waveEnemiesRemaining;
+  let defeatedBossFloors = next.runStats.defeatedBossFloors ? [...next.runStats.defeatedBossFloors] : [];
+  const caught: { enemy: Enemy; amount: number }[] = [];
 
   for (const enemy of enemies) {
     if (!enemy.alive) continue;
     const dx = enemy.x - ARENA.CENTER;
     const dy = enemy.y - ARENA.CENTER;
     if (dx * dx + dy * dy > SWITCH_IN_RADIUS * SWITCH_IN_RADIUS) continue;
-    const outcome = hitEnemy(enemy, baseDmg, attacker, next, rng, config);
+    const outcome = hitEnemy(enemy, baseDmg, attacker, next, rng, config, bonuses);
     totalDamage += outcome.amount;
     damagePerSlot[index] += outcome.amount;
     if (outcome.killed) {
       totalKills += 1;
       gold += outcome.goldGained;
       totalGold += outcome.goldGained;
+      if (enemy.isBoss && !defeatedBossFloors.includes(next.floor)) {
+        defeatedBossFloors.push(next.floor);
+      }
       remaining = Math.max(0, remaining - 1);
+    } else {
+      caught.push({ enemy, amount: outcome.amount });
     }
     floatingTexts.push(createFloatingText(nextTextId++, enemy.x, enemy.y, `${outcome.amount}`, '#ffd166'));
   }
+
+  // 3★+: the entry wave also carries a status (or a temporary bastion shield).
+  let shield = next.bastionShieldSec ?? 0;
+  if (starsOf(incoming) >= STAR_SWITCH_IN) {
+    const effect = SWITCH_IN_EFFECT_BY_TYPE[incoming.types[0]];
+    const duration = SWITCH_IN_EFFECT_DURATION[effect];
+    if (effect === 'SHIELD') {
+      shield = Math.max(shield, duration);
+    } else {
+      for (const { enemy, amount } of caught) applyStatus(enemy, effect, duration, { sourceDamage: amount, slot: index });
+    }
+  }
+  effects.push(
+    createEffect(nextTextId++, 'RING', incoming.types[0], ARENA.CENTER, ARENA.CENTER, {
+      radius: SWITCH_IN_RADIUS,
+    }),
+  );
 
   next = {
     ...next,
@@ -362,12 +533,15 @@ function applyHotSwap(
     gold,
     waveEnemiesRemaining: remaining,
     floatingTexts,
+    effects,
+    bastionShieldSec: shield,
     runStats: {
       ...next.runStats,
       totalKills,
       totalGoldEarned: totalGold,
       totalDamageDealt: totalDamage,
       damagePerSlot,
+      defeatedBossFloors,
     },
   };
   return next;
@@ -375,16 +549,18 @@ function applyHotSwap(
 
 function applyClick(
   state: GameState,
-  click: { x: number; y: number },
+  click: { x: number; y: number; isAuto?: boolean },
   config: GameConfig,
   rng: () => number,
 ): GameState {
   const active = getActive(state);
   if (!active) return state;
 
+  const bonuses = computeTeamBonuses(state.team, config.pokedex);
   const slotIndex = activeSlotIndex(state);
   const radius = clickRadius(state.bastionUpgrades);
-  const baseDmg = CLICK_BASE_DAMAGE * clickDamageMultiplier(state.bastionUpgrades);
+  const baseDmg =
+    CLICK_BASE_DAMAGE * clickDamageMultiplier(state.bastionUpgrades) * (1 + bonuses.clickDamage);
   const attacker = attackerOf(active, active.types);
 
   const enemies = state.enemies.map((e) => ({ ...e }));
@@ -396,15 +572,21 @@ function applyClick(
   let totalGold = state.runStats.totalGoldEarned;
   let totalDamage = state.runStats.totalDamageDealt;
   let remaining = state.waveEnemiesRemaining;
-  let hit = false;
+  let manualClicks = state.runStats.manualClicks ?? 0;
+  let autoClicks = state.runStats.autoClicks ?? 0;
+  let defeatedBossFloors = state.runStats.defeatedBossFloors ? [...state.runStats.defeatedBossFloors] : [];
+  if (click.isAuto) {
+    autoClicks += 1;
+  } else {
+    manualClicks += 1;
+  }
 
   for (const enemy of enemies) {
     if (!enemy.alive) continue;
     const dx = enemy.x - click.x;
     const dy = enemy.y - click.y;
     if (dx * dx + dy * dy > radius * radius) continue;
-    hit = true;
-    const outcome = hitEnemy(enemy, baseDmg, attacker, state, rng, config);
+    const outcome = hitEnemy(enemy, baseDmg, attacker, state, rng, config, bonuses);
     totalDamage += outcome.amount;
     damagePerSlot[slotIndex] += outcome.amount;
     floatingTexts.push(createFloatingText(nextTextId++, enemy.x, enemy.y, `${outcome.amount}`, '#ffffff'));
@@ -412,6 +594,9 @@ function applyClick(
       totalKills += 1;
       gold += outcome.goldGained;
       totalGold += outcome.goldGained;
+      if (enemy.isBoss && !defeatedBossFloors.includes(state.floor)) {
+        defeatedBossFloors.push(state.floor);
+      }
       remaining = Math.max(0, remaining - 1);
       floatingTexts.push(createFloatingText(nextTextId++, enemy.x, enemy.y, `+${outcome.goldGained}`, '#ffd700'));
     }
@@ -423,39 +608,82 @@ function applyClick(
     gold,
     waveEnemiesRemaining: remaining,
     floatingTexts,
-    ultimateCharge: hit
-      ? Math.min(state.ultimateMax, state.ultimateCharge + ULTIMATE_CHARGE_PER_CLICK)
-      : state.ultimateCharge,
     runStats: {
       ...state.runStats,
       totalKills,
       totalGoldEarned: totalGold,
       totalDamageDealt: totalDamage,
       damagePerSlot,
+      manualClicks,
+      autoClicks,
+      defeatedBossFloors,
     },
   };
 }
 
+/**
+ * Fire the active Pokémon's ultimate (PRD §3.2). Needs a full meter and at
+ * least one living enemy (the charge is never wasted on an empty arena).
+ * Shape / power / status come from data/ultimates.ts via the species' ultimate id.
+ */
 function applyUltimate(state: GameState, config: GameConfig, rng: () => number): GameState {
   const active = getActive(state);
-  if (!active || state.ultimateCharge < state.ultimateMax) return state;
+  if (!active || state.ultimateMax <= 0 || state.ultimateCharge < state.ultimateMax) return state;
+  if (!state.enemies.some((e) => e.alive)) return state;
 
   const slotIndex = activeSlotIndex(state);
+  const ult = getUltimate(config.pokedex[active.definitionId]?.ultimate.id ?? '');
+  const bonuses = computeTeamBonuses(state.team, config.pokedex);
   const attacker = attackerOf(active, active.types);
-  const baseDmg = PROJECTILE_BASE_DAMAGE * ULTIMATE_DAMAGE_MULTIPLIER;
+  const baseDmg = PROJECTILE_BASE_DAMAGE * ult.power;
   const enemies = state.enemies.map((e) => ({ ...e }));
   const damagePerSlot = [...state.runStats.damagePerSlot];
   const floatingTexts = [...state.floatingTexts];
+  const effects = [...(state.effects ?? [])];
   let nextTextId = maxEntityId(state) + 1;
   let gold = state.gold;
   let totalKills = state.runStats.totalKills;
   let totalGold = state.runStats.totalGoldEarned;
   let totalDamage = state.runStats.totalDamageDealt;
   let remaining = state.waveEnemiesRemaining;
+  let defeatedBossFloors = state.runStats.defeatedBossFloors ? [...state.runStats.defeatedBossFloors] : [];
+
+  // Targeting by shape.
+  const C = ARENA.CENTER;
+  const size = ult.size ?? 120;
+  let inRange: (e: Enemy) => boolean = () => true;
+  if (ult.shape === 'NOVA') {
+    inRange = (e) => Math.hypot(e.x - C, e.y - C) <= size + enemyHitbox(e);
+    effects.push(createEffect(nextTextId++, 'NOVA', active.types[0], C, C, { radius: size }));
+  } else if (ult.shape === 'BEAM') {
+    const nearest = enemies
+      .filter((e) => e.alive)
+      .reduce((a, b) => (dist2ToCenter(a) <= dist2ToCenter(b) ? a : b));
+    const len = Math.hypot(nearest.x - C, nearest.y - C) || 1;
+    const dx = (nearest.x - C) / len;
+    const dy = (nearest.y - C) / len;
+    const reach = ARENA.SIZE * 1.5;
+    inRange = (e) => {
+      const ex = e.x - C;
+      const ey = e.y - C;
+      const along = ex * dx + ey * dy;
+      const across = Math.abs(ex * dy - ey * dx);
+      return along >= 0 && along <= reach && across <= size + enemyHitbox(e);
+    };
+    effects.push(
+      createEffect(nextTextId++, 'BEAM', active.types[0], C, C, {
+        x2: C + dx * reach,
+        y2: C + dy * reach,
+        width: size * 2,
+      }),
+    );
+  } else {
+    effects.push(createEffect(nextTextId++, 'FLASH', active.types[0], C, C));
+  }
 
   for (const enemy of enemies) {
-    if (!enemy.alive) continue;
-    const outcome = hitEnemy(enemy, baseDmg, attacker, state, rng, config);
+    if (!enemy.alive || !inRange(enemy)) continue;
+    const outcome = hitEnemy(enemy, baseDmg, attacker, state, rng, config, bonuses);
     totalDamage += outcome.amount;
     damagePerSlot[slotIndex] += outcome.amount;
     floatingTexts.push(createFloatingText(nextTextId++, enemy.x, enemy.y, `${outcome.amount}`, '#c084fc'));
@@ -463,8 +691,13 @@ function applyUltimate(state: GameState, config: GameConfig, rng: () => number):
       totalKills += 1;
       gold += outcome.goldGained;
       totalGold += outcome.goldGained;
+      if (enemy.isBoss && !defeatedBossFloors.includes(state.floor)) {
+        defeatedBossFloors.push(state.floor);
+      }
       remaining = Math.max(0, remaining - 1);
       floatingTexts.push(createFloatingText(nextTextId++, enemy.x, enemy.y, `+${outcome.goldGained}`, '#ffd700'));
+    } else if (ult.status) {
+      applyStatus(enemy, ult.status, ULTIMATE_STATUS_DURATION, { sourceDamage: outcome.amount, slot: slotIndex });
     }
   }
 
@@ -474,6 +707,7 @@ function applyUltimate(state: GameState, config: GameConfig, rng: () => number):
     gold,
     waveEnemiesRemaining: remaining,
     floatingTexts,
+    effects,
     ultimateCharge: 0,
     runStats: {
       ...state.runStats,
@@ -481,6 +715,7 @@ function applyUltimate(state: GameState, config: GameConfig, rng: () => number):
       totalGoldEarned: totalGold,
       totalDamageDealt: totalDamage,
       damagePerSlot,
+      defeatedBossFloors,
     },
   };
 }
@@ -492,12 +727,26 @@ function applyInput(
   config: GameConfig,
   rng: () => number,
 ): GameState {
-  if (state.phase === 'STARTER_SELECT') {
-    return input.selectStarter ? startRun(state, input.selectStarter, config, rng) : state;
+  if (state.phase === 'STARTER_SELECT' || state.phase === 'MENU') {
+    if (input.startRun) return startRun(state, input.startRun, config, rng);
+    return input.selectStarter
+      ? startRun(state, [{ definitionId: input.selectStarter, stars: 1 }], config, rng)
+      : state;
   }
   if (state.phase !== 'PLAYING') return state;
 
   let next = state;
+  if (input.setAutoAdvance !== undefined) {
+    next = { ...next, autoAdvanceWave: input.setAutoAdvance };
+    // Turning AUTO back on while awaiting manual advance resumes the countdown.
+    if (input.setAutoAdvance === true && next.awaitingNextWave) {
+      next = { ...next, awaitingNextWave: false, interWaveTimerSec: INTER_WAVE_BREAK_SEC };
+    }
+  }
+  if (input.startNextWave && (next.awaitingNextWave || next.interWaveTimerSec !== undefined)) {
+    // The countdown-expiry branch of stepOnce spawns the wave on the next step.
+    next = { ...next, awaitingNextWave: false, interWaveTimerSec: 0 };
+  }
   if (input.buyTeamLevel) next = upgradeTeamLevel(next);
   if (input.buyUpgrade) next = purchaseUpgrade(next, input.buyUpgrade);
   if (typeof input.hotSwapIndex === 'number')
@@ -511,6 +760,7 @@ function applyInput(
 function stepOnce(state: GameState, config: GameConfig, rng: () => number): GameState {
   const dt = FIXED_TIMESTEP;
   const active = getActive(state);
+  const bonuses = computeTeamBonuses(state.team, config.pokedex);
 
   // Clone the mutable simulation entities so the input state stays untouched.
   const enemies: Enemy[] = state.enemies.map((e) => ({ ...e }));
@@ -521,13 +771,17 @@ function stepOnce(state: GameState, config: GameConfig, rng: () => number): Game
   const hotSwapCooldowns = state.hotSwapCooldowns.map((c) => Math.max(0, c - dt)) as Cooldowns6;
   const damagePerSlot = [...state.runStats.damagePerSlot];
   const slotIndex = activeSlotIndex(state);
-  // Age then drop expired floating texts so the array cannot grow unbounded.
+  // Age then drop expired floating texts / effects so the arrays cannot grow unbounded.
   const floatingTexts: FloatingText[] = state.floatingTexts
     .map((t) => ({ ...t, age: t.age + dt }))
     .filter((t) => t.age < t.maxAge);
+  const effects: VisualEffect[] = (state.effects ?? [])
+    .map((fx) => ({ ...fx, age: fx.age + dt }))
+    .filter((fx) => fx.age < fx.maxAge);
   let nextTextId = maxEntityId(state) + 1;
   let lastLeakerType: PokemonType | undefined;
 
+  const shieldSec = state.bastionShieldSec ?? 0;
   let bastionHp = state.bastionHp;
   let gold = state.gold;
   let totalKills = state.runStats.totalKills;
@@ -537,43 +791,140 @@ function stepOnce(state: GameState, config: GameConfig, rng: () => number): Game
   let bossTimerSec = state.bossTimerSec;
   let ultimateCharge = state.ultimateCharge;
   let floor = state.floor;
+  let interWaveTimerSec = state.interWaveTimerSec;
+  let awaitingNextWave = state.awaitingNextWave ?? false;
+  let defeatedBossFloors = state.runStats.defeatedBossFloors ? [...state.runStats.defeatedBossFloors] : [];
+  // Read the incoming state (before sections 6/7 mutate the locals): the regen
+  // pause must reflect the break the player is already in at the start of a tick.
+  const inBreak = state.interWaveTimerSec !== undefined || (state.awaitingNextWave ?? false);
+  const contactDamage =
+    (ENEMY_CONTACT_DAMAGE + state.bastionMaxHp * ENEMY_CONTACT_MAX_HP_FRACTION) *
+    (1 + (floor - 1) * ENEMY_CONTACT_DAMAGE_FLOOR_SCALE);
 
-  // 1. Enemies advance toward the center; leaks damage the bastion.
+  // The ultimate charges with time (1 s of run = 1 s of cooldown); ULT_CHARGE speeds it up.
+  if (state.ultimateMax > 0) {
+    ultimateCharge = Math.min(state.ultimateMax, ultimateCharge + dt * (1 + bonuses.ultCharge));
+  }
+
+  // 1. Status ticks, then enemies advance toward the center; leaks damage the bastion.
   for (const enemy of enemies) {
     if (!enemy.alive) continue;
+
+    let speedFactor = 1;
+    if (enemy.statuses) {
+      const burn = enemy.statuses.find((s) => s.id === 'BURN');
+      if (burn && (burn.dps ?? 0) > 0) {
+        const amount = (burn.dps ?? 0) * dt;
+        enemy.hp -= amount;
+        totalDamage += amount;
+        if (burn.sourceSlot !== undefined && burn.sourceSlot >= 0) damagePerSlot[burn.sourceSlot] += amount;
+        if (enemy.hp <= 0) {
+          enemy.alive = false;
+          const payout = goldFor(enemy, state, bonuses);
+          totalKills += 1;
+          gold += payout;
+          totalGold += payout;
+          if (enemy.isBoss && !defeatedBossFloors.includes(floor)) {
+            defeatedBossFloors.push(floor);
+          }
+          waveEnemiesRemaining = Math.max(0, waveEnemiesRemaining - 1);
+          floatingTexts.push(createFloatingText(nextTextId++, enemy.x, enemy.y, `+${payout}`, '#ffd700'));
+          continue;
+        }
+      }
+      if (enemy.statuses.some((s) => s.id === 'PARALYZE')) speedFactor = 0;
+      else if (enemy.statuses.some((s) => s.id === 'SLOW')) speedFactor = SLOW_SPEED_FACTOR;
+      enemy.statuses = tickStatus(enemy.statuses, dt);
+    }
+
     const dx = ARENA.CENTER - enemy.x;
     const dy = ARENA.CENTER - enemy.y;
     const d = Math.hypot(dx, dy);
-    if (d <= ARENA.BASTION_DAMAGE_R) {
-      bastionHp -= ENEMY_CONTACT_DAMAGE;
-      lastLeakerType = enemy.types[0];
-      enemy.alive = false;
-      enemy.hp = 0;
-      waveEnemiesRemaining = Math.max(0, waveEnemiesRemaining - 1);
-      floatingTexts.push(
-        createFloatingText(nextTextId++, enemy.x, enemy.y, `-${ENEMY_CONTACT_DAMAGE}`, '#ff4444'),
-      );
-      continue;
+    if (d <= ARENA.BASTION_DAMAGE_R || enemy.anchoredAtBastion) {
+      if (enemy.isBoss) {
+        enemy.anchoredAtBastion = true;
+        if (d > 0) {
+          enemy.x = ARENA.CENTER - (dx / d) * ARENA.BASTION_DAMAGE_R;
+          enemy.y = ARENA.CENTER - (dy / d) * ARENA.BASTION_DAMAGE_R;
+        }
+        const cd = (enemy.bossAttackCooldownSec !== undefined ? enemy.bossAttackCooldownSec : 0) - dt;
+        if (cd <= 0) {
+          const bossDmg = state.bastionMaxHp * BOSS_ANCHOR_MAX_HP_FRACTION;
+          if (shieldSec > 0) {
+            floatingTexts.push(createFloatingText(nextTextId++, enemy.x, enemy.y, 'BLOQUEO', '#58b0f8'));
+          } else {
+            bastionHp -= bossDmg;
+            lastLeakerType = enemy.types[0];
+            floatingTexts.push(
+              createFloatingText(nextTextId++, enemy.x, enemy.y, `-${Math.round(bossDmg)}`, '#ff4444'),
+            );
+          }
+          enemy.bossAttackCooldownSec = BOSS_ANCHOR_TICK_SEC;
+        } else {
+          enemy.bossAttackCooldownSec = cd;
+        }
+      } else {
+        if (shieldSec > 0) {
+          floatingTexts.push(createFloatingText(nextTextId++, enemy.x, enemy.y, 'BLOQUEO', '#58b0f8'));
+        } else {
+          bastionHp -= contactDamage;
+          lastLeakerType = enemy.types[0];
+          floatingTexts.push(
+            createFloatingText(nextTextId++, enemy.x, enemy.y, `-${Math.round(contactDamage)}`, '#ff4444'),
+          );
+        }
+        enemy.alive = false;
+        enemy.hp = 0;
+        waveEnemiesRemaining = Math.max(0, waveEnemiesRemaining - 1);
+        continue;
+      }
+    } else {
+      const move = Math.min(d, enemy.speed * speedFactor * dt);
+      enemy.x += (dx / d) * move;
+      enemy.y += (dy / d) * move;
     }
-    const move = Math.min(d, enemy.speed * dt);
-    enemy.x += (dx / d) * move;
-    enemy.y += (dy / d) * move;
   }
 
-  // Bastion passive regeneration (PRD §4.1); skipped once destroyed.
-  if (bastionHp > 0) {
+  // Bastion passive regeneration (PRD §4.1 + BASTION_REGEN passives); paused
+  // during the breather, and skipped once destroyed.
+  if (bastionHp > 0 && !inBreak) {
     bastionHp = Math.min(
       state.bastionMaxHp,
-      bastionHp + state.bastionMaxHp * BASTION_REGEN_FRACTION_PER_SEC * dt,
+      bastionHp + state.bastionMaxHp * (BASTION_REGEN_FRACTION_PER_SEC + bonuses.bastionRegen) * dt,
     );
   }
 
+  /** One damaging hit from the active Pokémon: damage, kill payout, texts. */
+  const strike = (
+    enemy: Enemy,
+    baseDmg: number,
+    types: readonly PokemonType[],
+    color: string,
+  ): void => {
+    const outcome = hitEnemy(enemy, baseDmg, attackerOf(active, types), state, rng, config, bonuses);
+    totalDamage += outcome.amount;
+    if (slotIndex >= 0) damagePerSlot[slotIndex] += outcome.amount;
+    floatingTexts.push(createFloatingText(nextTextId++, enemy.x, enemy.y, `${outcome.amount}`, color));
+    if (outcome.killed) {
+      totalKills += 1;
+      gold += outcome.goldGained;
+      totalGold += outcome.goldGained;
+      if (enemy.isBoss && !defeatedBossFloors.includes(floor)) {
+        defeatedBossFloors.push(floor);
+      }
+      waveEnemiesRemaining = Math.max(0, waveEnemiesRemaining - 1);
+      floatingTexts.push(
+        createFloatingText(nextTextId++, enemy.x, enemy.y, `+${outcome.goldGained}`, '#ffd700'),
+      );
+    }
+  };
+
   // 2. Auto-fire.
   if (active) {
-    for (const p of fireProjectiles(state, active, enemies, rng)) projectiles.push(p);
+    for (const p of fireProjectiles(state, active, enemies, rng, bonuses)) projectiles.push(p);
   }
 
-  // 3. Projectiles move, then resolve hits (damage, kills, pierce/bounce).
+  // 3. Projectiles move, then resolve hits (damage, kills, splash, pierce/bounce).
   const liveProjectiles: Projectile[] = [];
   for (const p of projectiles) {
     p.x += p.vx * dt;
@@ -583,30 +934,25 @@ function stepOnce(state: GameState, config: GameConfig, rng: () => number): Game
     let dead = false;
     for (const enemy of enemies) {
       if (!enemy.alive || p.hitIds?.includes(enemy.id)) continue;
-      const rr = (enemy.isBoss ? ARENA.BOSS_HITBOX_R : ARENA.ENEMY_HITBOX_R) + ARENA.PROJECTILE_R;
+      const rr = enemyHitbox(enemy) + ARENA.PROJECTILE_R;
       const dx = enemy.x - p.x;
       const dy = enemy.y - p.y;
       if (dx * dx + dy * dy > rr * rr) continue;
 
-      const outcome = hitEnemy(enemy, p.damage, attackerOf(active, p.types), state, rng, config);
-      totalDamage += outcome.amount;
-      if (slotIndex >= 0) damagePerSlot[slotIndex] += outcome.amount;
-      floatingTexts.push(
-        createFloatingText(nextTextId++, enemy.x, enemy.y, `${outcome.amount}`, '#ffffff'),
-      );
-      if (outcome.amount > 0) {
-        ultimateCharge = Math.min(state.ultimateMax, ultimateCharge + ULTIMATE_CHARGE_PER_HIT);
-      }
-      if (outcome.killed) {
-        totalKills += 1;
-        gold += outcome.goldGained;
-        totalGold += outcome.goldGained;
-        waveEnemiesRemaining = Math.max(0, waveEnemiesRemaining - 1);
-        floatingTexts.push(
-          createFloatingText(nextTextId++, enemy.x, enemy.y, `+${outcome.goldGained}`, '#ffd700'),
-        );
-      }
+      strike(enemy, p.damage, p.types, '#ffffff');
       p.hitIds = [...(p.hitIds ?? []), enemy.id];
+
+      // AOE: the explosion also hurts everything near the impact point.
+      if (p.splashRadius) {
+        for (const other of enemies) {
+          if (other === enemy || !other.alive) continue;
+          const sx = other.x - enemy.x;
+          const sy = other.y - enemy.y;
+          if (sx * sx + sy * sy <= p.splashRadius * p.splashRadius) {
+            strike(other, p.damage * AOE_SPLASH_DAMAGE_FACTOR, p.types, '#ffe0a0');
+          }
+        }
+      }
 
       if (p.pierce && p.pierce > 0) {
         p.pierce -= 1;
@@ -630,7 +976,8 @@ function stepOnce(state: GameState, config: GameConfig, rng: () => number): Game
 
   // 4. Boss kill-timer.
   const boss = aliveEnemies.find((e) => e.isBoss);
-  bossTimerSec = boss ? (bossTimerSec ?? BOSS_TIMER_DURATION) - dt : undefined;
+  bossTimerSec = boss ? (bossTimerSec ?? (boss.bossTimerSec ?? bossTimerForFloor(floor))) - dt : undefined;
+  if (boss) boss.bossTimerSec = bossTimerSec;
 
   const runStats = {
     ...state.runStats,
@@ -638,10 +985,12 @@ function stepOnce(state: GameState, config: GameConfig, rng: () => number): Game
     totalGoldEarned: totalGold,
     totalDamageDealt: totalDamage,
     damagePerSlot,
+    defeatedBossFloors,
     durationSec: state.runStats.durationSec + dt,
     floorReached: Math.max(state.runStats.floorReached, floor),
   };
   const team = syncCooldownMirrors(state.team, hotSwapCooldowns);
+  const nextShield = Math.max(0, shieldSec - dt);
 
   // 5. Game over: bastion destroyed or a boss outlived its timer.
   if (bastionHp <= 0 || (boss && bossTimerSec !== undefined && bossTimerSec <= 0)) {
@@ -653,11 +1002,15 @@ function stepOnce(state: GameState, config: GameConfig, rng: () => number): Game
       enemies: aliveEnemies,
       projectiles: liveProjectiles,
       floatingTexts,
+      effects,
+      bastionShieldSec: nextShield,
       bastionHp: Math.max(0, bastionHp),
       gold,
       bossTimerSec,
       ultimateCharge,
       waveEnemiesRemaining,
+      interWaveTimerSec,
+      awaitingNextWave,
       hotSwapCooldowns,
       team,
       runStats: {
@@ -669,15 +1022,34 @@ function stepOnce(state: GameState, config: GameConfig, rng: () => number): Game
     };
   }
 
-  // 6. Wave complete: advance a floor and spawn the next wave.
+  // 6. Wave cleared -> enter the breather (guarded so it triggers once).
   let finalEnemies = aliveEnemies;
-  if (waveEnemiesRemaining <= 0 && aliveEnemies.length === 0) {
-    floor += 1;
-    const wave = generateWave(floor, rng);
-    finalEnemies = wave;
-    waveEnemiesRemaining = wave.length;
-    bossTimerSec = wave.some((e) => e.isBoss) ? BOSS_TIMER_DURATION : undefined;
-    runStats.floorReached = Math.max(runStats.floorReached, floor);
+  if (
+    waveEnemiesRemaining <= 0 &&
+    aliveEnemies.length === 0 &&
+    interWaveTimerSec === undefined &&
+    !awaitingNextWave
+  ) {
+    if (state.autoAdvanceWave === false) awaitingNextWave = true;
+    else interWaveTimerSec = INTER_WAVE_BREAK_SEC;
+  }
+
+  // 7. Breather countdown -> spawn the next floor when it expires (the floor
+  // counter advances at spawn time, not at clear time).
+  if (!awaitingNextWave && interWaveTimerSec !== undefined) {
+    interWaveTimerSec -= dt;
+    if (interWaveTimerSec <= 0) {
+      interWaveTimerSec = undefined;
+      floor += 1;
+      const waveRng = config.seed !== undefined ? rngFor(config.seed, 'WAVE', floor) : rng;
+      const wave = generateWave(floor, waveRng);
+      finalEnemies = wave;
+      waveEnemiesRemaining = wave.length;
+      bossTimerSec = wave.some((e) => e.isBoss)
+        ? (wave.find((e) => e.isBoss)?.bossTimerSec ?? bossTimerForFloor(floor))
+        : undefined;
+      runStats.floorReached = Math.max(runStats.floorReached, floor);
+    }
   }
 
   return {
@@ -686,11 +1058,15 @@ function stepOnce(state: GameState, config: GameConfig, rng: () => number): Game
     enemies: finalEnemies,
     projectiles: liveProjectiles,
     floatingTexts,
+    effects,
+    bastionShieldSec: nextShield,
     bastionHp: Math.max(0, bastionHp),
     gold,
     bossTimerSec,
     ultimateCharge,
     waveEnemiesRemaining,
+    interWaveTimerSec,
+    awaitingNextWave,
     hotSwapCooldowns,
     team,
     runStats,

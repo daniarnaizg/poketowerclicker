@@ -21,6 +21,7 @@ function makeState(phase: GameState['phase']): GameState {
       UP_CRIT: 0,
       UP_CDMG: 0,
       UP_GOLD: 0,
+      UP_WALL: 0,
     },
     enemies: [],
     projectiles: [],
@@ -52,6 +53,8 @@ describe('useGameStore', () => {
     s.requestClickAttack(10, 20);
     s.purchaseUpgrade('UP_HP');
     s.requestTeamLevelUp();
+    s.requestStartNextWave();
+    s.requestSetAutoAdvance(false);
 
     expect(useGameStore.getState().consumeInput()).toEqual({
       selectStarter: '0004',
@@ -60,8 +63,15 @@ describe('useGameStore', () => {
       click: { x: 10, y: 20 },
       buyUpgrade: 'UP_HP',
       buyTeamLevel: true,
+      startNextWave: true,
+      setAutoAdvance: false,
     });
     expect(useGameStore.getState().consumeInput()).toEqual({});
+
+    s.requestClickAttack(15, 25, true);
+    expect(useGameStore.getState().consumeInput()).toEqual({
+      click: { x: 15, y: 25, isAuto: true },
+    });
   });
 
   it('pushes on phase change and throttles same-phase frames', () => {

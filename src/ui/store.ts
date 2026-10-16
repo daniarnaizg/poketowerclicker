@@ -10,7 +10,7 @@
  */
 
 import { create } from 'zustand';
-import type { BastionUpgradeId, GameInput, GamePhase, GameState } from '../core/types';
+import type { BastionUpgradeId, GameInput, GamePhase, GameState, LoadoutEntry } from '../core/types';
 
 /** HUD refresh cadence in ms when the phase is unchanged. */
 const HUD_INTERVAL_MS = 100;
@@ -30,11 +30,18 @@ interface GameStore {
   selectStarter: (starterId: string) => void;
   requestHotSwap: (slotIndex: number) => void;
   requestUltimate: () => void;
-  requestClickAttack: (x: number, y: number) => void;
+  requestClickAttack: (x: number, y: number, isAuto?: boolean) => void;
   purchaseUpgrade: (upgradeId: BastionUpgradeId) => void;
   requestTeamLevelUp: () => void;
+  /** Spawn the next floor now, skipping the inter-wave breather. */
+  requestStartNextWave: () => void;
+  /** Turn the automatic inter-wave advance on or off. */
+  requestSetAutoAdvance: (on: boolean) => void;
+  /** Start a run from the 6-slot loadout chosen in the Caja (MENU phase). */
+  requestStartRun: (loadout: (LoadoutEntry | null)[]) => void;
   consumeInput: () => GameInput;
-  startNewGame: () => void;
+  /** Reset UI state; `phase` is where the player lands (MENU once a starter exists). */
+  startNewGame: (phase?: GamePhase) => void;
 }
 
 export const useGameStore = create<GameStore>((set, get) => {
@@ -63,9 +70,13 @@ export const useGameStore = create<GameStore>((set, get) => {
     selectStarter: (starterId) => queue({ selectStarter: starterId }),
     requestHotSwap: (slotIndex) => queue({ hotSwapIndex: slotIndex }),
     requestUltimate: () => queue({ useUltimate: true }),
-    requestClickAttack: (x, y) => queue({ click: { x, y } }),
+    requestClickAttack: (x, y, isAuto) =>
+      queue({ click: isAuto !== undefined ? { x, y, isAuto } : { x, y } }),
     purchaseUpgrade: (upgradeId) => queue({ buyUpgrade: upgradeId }),
     requestTeamLevelUp: () => queue({ buyTeamLevel: true }),
+    requestStartNextWave: () => queue({ startNextWave: true }),
+    requestSetAutoAdvance: (on) => queue({ setAutoAdvance: on }),
+    requestStartRun: (loadout) => queue({ startRun: loadout }),
 
     consumeInput: () => {
       const input = get().pendingInput;
@@ -73,10 +84,10 @@ export const useGameStore = create<GameStore>((set, get) => {
       return input;
     },
 
-    startNewGame: () => {
+    startNewGame: (phase = 'STARTER_SELECT') => {
       lastHudPush = 0;
       lastPushedPhase = null;
-      set({ gameState: null, phase: 'STARTER_SELECT', hudVersion: 0, pendingInput: {} });
+      set({ gameState: null, phase, hudVersion: 0, pendingInput: {} });
     },
   };
 });
