@@ -30,7 +30,7 @@ interface GameStore {
   selectStarter: (starterId: string) => void;
   requestHotSwap: (slotIndex: number) => void;
   requestUltimate: () => void;
-  requestClickAttack: (x: number, y: number) => void;
+  requestClickAttack: (x: number, y: number, isAuto?: boolean) => void;
   purchaseUpgrade: (upgradeId: BastionUpgradeId) => void;
   requestTeamLevelUp: () => void;
   /** Spawn the next floor now, skipping the inter-wave breather. */
@@ -70,7 +70,8 @@ export const useGameStore = create<GameStore>((set, get) => {
     selectStarter: (starterId) => queue({ selectStarter: starterId }),
     requestHotSwap: (slotIndex) => queue({ hotSwapIndex: slotIndex }),
     requestUltimate: () => queue({ useUltimate: true }),
-    requestClickAttack: (x, y) => queue({ click: { x, y } }),
+    requestClickAttack: (x, y, isAuto) =>
+      queue({ click: isAuto !== undefined ? { x, y, isAuto } : { x, y } }),
     purchaseUpgrade: (upgradeId) => queue({ buyUpgrade: upgradeId }),
     requestTeamLevelUp: () => queue({ buyTeamLevel: true }),
     requestStartNextWave: () => queue({ startNextWave: true }),

@@ -20,7 +20,13 @@ import { tickGame } from './core/gameLoop';
 import { TYPE_CHART } from './core/damage';
 import { POKEDEX } from './data/pokemon';
 import { ARENA } from './config/arena.config';
-import { BASTION_BASE_HP, FIXED_TIMESTEP, HOLD_FIRE_INTERVAL_MS } from './config/balance.config';
+import {
+  AUTOCLICK_CPS_BY_LEVEL,
+  BASTION_BASE_HP,
+  FIXED_TIMESTEP,
+  HOLD_FIRE_INTERVAL_MS,
+} from './config/balance.config';
+import { biomeAt } from './data/biomes';
 import type {
   BastionUpgrades as BastionUpgradeLevels,
   Cooldowns6,
@@ -60,6 +66,7 @@ const ZERO_UPGRADES: BastionUpgradeLevels = {
   UP_CDMG: 0,
   UP_GOLD: 0,
   UP_WALL: 0,
+  UP_AUTOCLICK: 0,
 };
 
 function emptySlot(index: number): TeamSlot {
@@ -129,6 +136,15 @@ export default function App() {
     }
   }, [phase, gameState]);
 
+  // Biome Theme Sync: update document.body.dataset.biome based on current floor
+  useEffect(() => {
+    if (gameState) {
+      document.body.dataset.biome = biomeAt(gameState.floor).id;
+    } else {
+      document.body.dataset.biome = 'RUTA_VERDE';
+    }
+  }, [gameState?.floor]);
+
   // Simulation loop: one rAF frame == one tickGame call + one draw.
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -137,10 +153,15 @@ export default function App() {
     const store = useGameStore.getState();
     store.setGameState(stateRef.current);
 
-    // Click attack (mouse + touch): `pointerdown` fires once, then the frame
-    // loop repeats it every HOLD_FIRE_INTERVAL_MS (hold-to-fire cap). Pointer
-    // capture keeps the release even when it happens outside the canvas.
+    // Pointer tracking:
+    // - On mouse: tracks hover coordinates { x, y, inside }.
+    // - On touch: when UP_AUTOCLICK >= 1, tap sets pinnedTarget = { x, y }.
+    // - Hold-to-fire: tracks active hold and repeats every HOLD_FIRE_INTERVAL_MS.
     const hold = { active: false, x: 0, y: 0, lastFire: 0 };
+    const mouse = { x: 0, y: 0, inside: false };
+    let pinnedTarget: { x: number; y: number } | null = null;
+    let lastAutoClick = 0;
+
     const toArena = (e: PointerEvent): { x: number; y: number } | null => {
       const rect = canvas.getBoundingClientRect();
       if (rect.width === 0 || rect.height === 0) return null;
@@ -149,6 +170,7 @@ export default function App() {
         y: (e.clientY - rect.top) * (ARENA.SIZE / rect.height),
       };
     };
+
     const onPointerDown = (e: PointerEvent): void => {
       if (e.button !== 0) return;
       const point = toArena(e);
@@ -158,17 +180,69 @@ export default function App() {
       hold.y = point.y;
       hold.lastFire = performance.now();
       canvas.setPointerCapture(e.pointerId);
-      store.requestClickAttack(hold.x, hold.y);
+      if (stateRef.current.phase === 'PLAYING') {
+        store.requestClickAttack(hold.x, hold.y, false);
+      }
+      if (e.pointerType === 'touch') {
+        const autoclickLevel = stateRef.current.bastionUpgrades.UP_AUTOCLICK ?? 0;
+        if (autoclickLevel >= 1) {
+          pinnedTarget = { x: point.x, y: point.y };
+        }
+      }
     };
-    const onPointerEnd = (): void => {
+
+    const onPointerMove = (e: PointerEvent): void => {
+      const point = toArena(e);
+      if (!point) return;
+      if (hold.active) {
+        hold.x = point.x;
+        hold.y = point.y;
+      }
+      if (e.pointerType === 'mouse') {
+        mouse.x = point.x;
+        mouse.y = point.y;
+        mouse.inside = true;
+      }
+    };
+
+    const onPointerEnter = (e: PointerEvent): void => {
+      if (e.pointerType === 'mouse') {
+        mouse.inside = true;
+        const point = toArena(e);
+        if (point) {
+          mouse.x = point.x;
+          mouse.y = point.y;
+        }
+      }
+    };
+
+    const onPointerLeave = (e: PointerEvent): void => {
+      if (e.pointerType === 'mouse') {
+        mouse.inside = false;
+      }
+    };
+
+    const onPointerEnd = (e: PointerEvent): void => {
       hold.active = false;
+      try {
+        if (canvas.hasPointerCapture(e.pointerId)) {
+          canvas.releasePointerCapture(e.pointerId);
+        }
+      } catch {
+        // pointer capture already lost
+      }
     };
+
     // Right click = ultimate (PRD §3.3 "clic secundario"); never opens the browser menu.
     const onContextMenu = (e: MouseEvent): void => {
       e.preventDefault();
       store.requestUltimate();
     };
+
     canvas.addEventListener('pointerdown', onPointerDown);
+    canvas.addEventListener('pointermove', onPointerMove);
+    canvas.addEventListener('pointerenter', onPointerEnter);
+    canvas.addEventListener('pointerleave', onPointerLeave);
     canvas.addEventListener('pointerup', onPointerEnd);
     canvas.addEventListener('pointercancel', onPointerEnd);
     canvas.addEventListener('contextmenu', onContextMenu);
@@ -184,10 +258,36 @@ export default function App() {
       last = now;
       const steps = Math.floor((acc + 0.001) / STEP_MS);
       acc -= steps * STEP_MS;
-      if (hold.active && now - hold.lastFire >= HOLD_FIRE_INTERVAL_MS) {
-        hold.lastFire = now;
-        store.requestClickAttack(hold.x, hold.y);
+
+      if (stateRef.current.phase === 'PLAYING') {
+        if (hold.active) {
+          if (now - hold.lastFire >= HOLD_FIRE_INTERVAL_MS) {
+            hold.lastFire = now;
+            store.requestClickAttack(hold.x, hold.y, false);
+          }
+        } else {
+          const autoclickLevel = stateRef.current.bastionUpgrades.UP_AUTOCLICK ?? 0;
+          if (autoclickLevel >= 1) {
+            let target: { x: number; y: number } | null = null;
+            if (mouse.inside) {
+              target = { x: mouse.x, y: mouse.y };
+            } else if (pinnedTarget) {
+              target = pinnedTarget;
+            }
+            if (target) {
+              const cps = AUTOCLICK_CPS_BY_LEVEL[autoclickLevel] ?? 1;
+              const autoInterval = 1000 / cps;
+              if (now - lastAutoClick >= autoInterval) {
+                lastAutoClick = now;
+                store.requestClickAttack(target.x, target.y, true);
+              }
+            }
+          }
+        }
+      } else {
+        pinnedTarget = null;
       }
+
       const input = store.consumeInput();
       const delta = steps > 0 ? steps * STEP_MS + 0.001 : 0;
       const next = tickGame(stateRef.current, input, GAME_CONFIG, delta, rngRef.current);
@@ -201,6 +301,9 @@ export default function App() {
     return () => {
       cancelAnimationFrame(raf);
       canvas.removeEventListener('pointerdown', onPointerDown);
+      canvas.removeEventListener('pointermove', onPointerMove);
+      canvas.removeEventListener('pointerenter', onPointerEnter);
+      canvas.removeEventListener('pointerleave', onPointerLeave);
       canvas.removeEventListener('pointerup', onPointerEnd);
       canvas.removeEventListener('pointercancel', onPointerEnd);
       canvas.removeEventListener('contextmenu', onContextMenu);
@@ -246,37 +349,41 @@ export default function App() {
   };
 
   return (
-    <div class="flex h-screen flex-col overflow-y-auto lg:flex-row lg:overflow-hidden">
+    <div class="flex h-dvh flex-col overflow-y-auto lg:flex-row lg:overflow-hidden">
       <div class="arena-stage min-h-[70vw] p-5 lg:min-h-0 lg:p-8">
         <div class="arena-container">
           <canvas ref={canvasRef} width={ARENA.SIZE} height={ARENA.SIZE} />
         </div>
       </div>
 
-      <div class="flex w-full flex-col gap-4 p-4 lg:h-full lg:w-[26rem] lg:overflow-hidden lg:p-6">
+      <div class="game-sidebar flex w-full flex-col gap-4 p-4 lg:h-full lg:w-[26rem] lg:overflow-hidden lg:p-6">
         {gameState && (
           <>
-            <GameHUD
-              gameState={gameState}
-              onUltimate={() => useGameStore.getState().requestUltimate()}
-              onToggleAutoAdvance={() =>
-                useGameStore.getState().requestSetAutoAdvance(gameState.autoAdvanceWave === false)
-              }
-              onStartNextWave={() => useGameStore.getState().requestStartNextWave()}
-            />
-            <TeamBar
-              team={gameState.team}
-              hotSwapCooldowns={gameState.hotSwapCooldowns}
-              teamLevel={gameState.teamLevel}
-              onHotSwap={(i) => useGameStore.getState().requestHotSwap(i)}
-            />
-            <BastionUpgrades
-              upgrades={gameState.bastionUpgrades}
-              gold={gameState.gold}
-              teamLevel={gameState.teamLevel}
-              onPurchase={(id) => useGameStore.getState().purchaseUpgrade(id)}
-              onBuyTeamLevel={() => useGameStore.getState().requestTeamLevelUp()}
-            />
+            <div class="game-sidebar-col-1 flex flex-col gap-4">
+              <GameHUD
+                gameState={gameState}
+                onUltimate={() => useGameStore.getState().requestUltimate()}
+                onToggleAutoAdvance={() =>
+                  useGameStore.getState().requestSetAutoAdvance(gameState.autoAdvanceWave === false)
+                }
+                onStartNextWave={() => useGameStore.getState().requestStartNextWave()}
+              />
+              <TeamBar
+                team={gameState.team}
+                hotSwapCooldowns={gameState.hotSwapCooldowns}
+                teamLevel={gameState.teamLevel}
+                onHotSwap={(i) => useGameStore.getState().requestHotSwap(i)}
+              />
+            </div>
+            <div class="game-sidebar-col-2 flex min-h-0 flex-1 flex-col">
+              <BastionUpgrades
+                upgrades={gameState.bastionUpgrades}
+                gold={gameState.gold}
+                teamLevel={gameState.teamLevel}
+                onPurchase={(id) => useGameStore.getState().purchaseUpgrade(id)}
+                onBuyTeamLevel={() => useGameStore.getState().requestTeamLevelUp()}
+              />
+            </div>
           </>
         )}
       </div>

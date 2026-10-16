@@ -23,11 +23,11 @@ const hpColor = (r: number) => (r > 0.5 ? '#48c048' : r >= 0.25 ? '#f8d030' : '#
 
 export function TeamBar({ team, hotSwapCooldowns, teamLevel, onHotSwap }: Props) {
   return (
-    <div class="pk-window shrink-0 p-3">
-      <div class="mb-3 flex items-center gap-2 text-[11px]">
+    <div class="team-bar pk-window shrink-0 p-3">
+      <div class="team-bar-header mb-3 flex items-center gap-2 text-[11px]">
         <span class="pk-ball" /> EQUIPO
       </div>
-      <div class="grid grid-cols-3 gap-2.5">
+      <div class="team-bar-grid grid grid-cols-3 gap-2.5">
         {team.map((slot, i) => {
           const pkm = slot.pokemon;
           const cooldown = hotSwapCooldowns[i];
@@ -45,7 +45,7 @@ export function TeamBar({ team, hotSwapCooldowns, teamLevel, onHotSwap }: Props)
               onClick={() => onHotSwap(i)}
               title={pkm && passive && stars >= 2 ? `Pasiva: ${describePassive(passive.stat, passive.value * (apex ? 2 : 1))}` : undefined}
               data-testid={`team-slot-${i}`}
-              class={`pk-btn relative flex flex-col items-center gap-1 px-1 py-2 text-[9px] ${
+              class={`pk-btn team-slot-btn relative flex flex-col items-center gap-1 px-1 py-2 text-[9px] ${
                 slot.isActive ? 'pk-btn-active' : ''
               }`}
               style={apex ? { borderColor: '#e0a000', boxShadow: '0 4px 0 #e0a000, 0 0 8px #ffd860' } : undefined}

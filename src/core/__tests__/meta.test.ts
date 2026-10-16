@@ -158,6 +158,13 @@ describe('settleRun', () => {
     expect(r.rewards.firstClearFloors).toEqual([10, 20, 30, 40, 50]);
     expect(r.rewards.sealsFirstClear).toBe(4 * SEALS_FIRST_CLEAR_MINIBOSS + SEALS_FIRST_CLEAR_MAJOR_BOSS);
   });
+
+  it('uses defeatedBossFloors when provided (Decision D1 / Issue I2)', () => {
+    const res = settleRun(started(), { floorReached: 25, defeatedBossFloors: [10] });
+    expect(res.rewards.firstClearFloors).toEqual([10]);
+    expect(res.rewards.sealsFirstClear).toBe(SEALS_FIRST_CLEAR_MINIBOSS);
+    expect(res.meta.clearedBossFloors).toEqual([10]);
+  });
 });
 
 describe('sanitizeMeta', () => {

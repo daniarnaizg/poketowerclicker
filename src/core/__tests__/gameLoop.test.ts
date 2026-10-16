@@ -10,12 +10,14 @@ import {
   BOSS_TIMER_DURATION,
   ENEMY_CONTACT_DAMAGE,
   ENEMY_CONTACT_DAMAGE_FLOOR_SCALE,
+  ENEMY_CONTACT_MAX_HP_FRACTION,
   HOT_SWAP_COOLDOWN,
   INTER_WAVE_BREAK_SEC,
   WALL_HP_PER_LEVEL,
   WAVE_ENEMY_COUNT_BASE,
   enemyHp,
 } from '../../config/balance.config';
+import { getEnemyDef } from '../../data/enemies';
 import type { BastionUpgrades, Cooldowns6, GameConfig, GameState, Team6 } from '../types';
 
 const config: GameConfig = { pokedex: POKEDEX, typeChart: TYPE_CHART, seed: 42 };
@@ -86,7 +88,8 @@ describe('generateWave', () => {
     expect(wave.every((e) => !e.isBoss)).toBe(true);
     for (const enemy of wave) {
       expect(Math.hypot(enemy.x - ARENA.CENTER, enemy.y - ARENA.CENTER)).toBeCloseTo(ARENA.CENTER, 5);
-      expect(enemy.hp).toBe(enemyHp(5));
+      const def = getEnemyDef(enemy.definitionId);
+      expect(enemy.hp).toBe(Math.max(1, Math.floor(enemyHp(5) * (def.hpFactor ?? 1))));
     }
     expect(new Set(wave.map((e) => e.id)).size).toBe(WAVE_ENEMY_COUNT_BASE);
   });
@@ -228,14 +231,16 @@ describe('tickGame', () => {
   });
 
   it('scales contact damage with the floor (≈1.4x at floor 41 vs floor 1)', () => {
+    const bastionMaxHp = 10_000;
+    const baseContact = ENEMY_CONTACT_DAMAGE + bastionMaxHp * ENEMY_CONTACT_MAX_HP_FRACTION;
     const leakDamage = (floor: number): number => {
       const base = startingRun(43);
       const atCenter = { ...base.enemies[0], x: ARENA.CENTER, y: ARENA.CENTER };
       const doomed: GameState = {
         ...base,
         floor,
-        bastionHp: 10_000,
-        bastionMaxHp: 10_000,
+        bastionHp: bastionMaxHp,
+        bastionMaxHp,
         enemies: [atCenter],
         waveEnemiesRemaining: 1,
         // Pause regen (breather) so the contact hit is not healed away within the tick.
@@ -243,9 +248,39 @@ describe('tickGame', () => {
       };
       return doomed.bastionHp - tickGame(doomed, {}, config, 16.7, mulberry32(44)).bastionHp;
     };
-    expect(leakDamage(1)).toBeCloseTo(ENEMY_CONTACT_DAMAGE, 5);
-    expect(leakDamage(41)).toBeCloseTo(ENEMY_CONTACT_DAMAGE * (1 + 40 * ENEMY_CONTACT_DAMAGE_FLOOR_SCALE), 5);
+    expect(leakDamage(1)).toBeCloseTo(baseContact, 5);
+    expect(leakDamage(41)).toBeCloseTo(baseContact * (1 + 40 * ENEMY_CONTACT_DAMAGE_FLOOR_SCALE), 5);
     expect(leakDamage(41)).toBeCloseTo(1.4 * leakDamage(1), 5);
+  });
+
+  it('boss anchors at bastion perimeter instead of disappearing on contact (Decision D1)', () => {
+    const base = startingRun(100);
+    const bossEnemy = {
+      ...base.enemies[0],
+      id: 1,
+      x: ARENA.CENTER,
+      y: ARENA.CENTER + 10,
+      hp: 1000,
+      maxHp: 1000,
+      alive: true,
+      isBoss: true,
+      definitionId: '0127',
+      kind: 'miniboss' as const,
+    };
+    const state: GameState = {
+      ...base,
+      bastionHp: 500,
+      bastionMaxHp: 500,
+      enemies: [bossEnemy],
+      waveEnemiesRemaining: 1,
+      interWaveTimerSec: 1.5,
+    };
+    const next = tickGame(state, {}, config, 1000 / 60, mulberry32(1));
+    expect(next.enemies).toHaveLength(1);
+    expect(next.enemies[0].alive).toBe(true);
+    expect(next.enemies[0].anchoredAtBastion).toBe(true);
+    expect(next.waveEnemiesRemaining).toBe(1);
+    expect(next.bastionHp).toBeLessThan(500); // took boss anchor strike damage
   });
 
   it('UP_WALL raises max HP by 10% (rounded) and heals by the same amount', () => {
@@ -263,6 +298,34 @@ describe('tickGame', () => {
     const base = startingRun(81);
     const poor: GameState = { ...base, gold: 0, bastionMaxHp: 130, bastionHp: 50 };
     expect(purchaseUpgrade(poor, 'UP_WALL')).toBe(poor);
+  });
+
+  it('UP_AUTOCLICK increments level and deducts gold up to max level', () => {
+    const base = startingRun(81);
+    const cost0 = calculateUpgradeCost('UP_AUTOCLICK', 0);
+    expect(cost0).toBe(25);
+
+    const withGold: GameState = { ...base, gold: 1000, bastionUpgrades: { ...base.bastionUpgrades, UP_AUTOCLICK: 0 } };
+    const bought = purchaseUpgrade(withGold, 'UP_AUTOCLICK');
+    expect(bought.bastionUpgrades.UP_AUTOCLICK).toBe(1);
+    expect(bought.gold).toBe(1000 - cost0);
+
+    // Max level 5 cannot be exceeded
+    const maxed: GameState = { ...base, gold: 1000, bastionUpgrades: { ...base.bastionUpgrades, UP_AUTOCLICK: 5 } };
+    expect(calculateUpgradeCost('UP_AUTOCLICK', 5)).toBe(Infinity);
+    expect(purchaseUpgrade(maxed, 'UP_AUTOCLICK')).toBe(maxed);
+  });
+
+  it('tracks manualClicks and autoClicks in runStats', () => {
+    const base = startingRun(91);
+    const enemy = base.enemies[0];
+    const withManual = tickGame(base, { click: { x: enemy.x, y: enemy.y, isAuto: false } }, config, 0, mulberry32(1));
+    expect(withManual.runStats.manualClicks).toBe(1);
+    expect(withManual.runStats.autoClicks).toBe(0);
+
+    const withAuto = tickGame(withManual, { click: { x: enemy.x, y: enemy.y, isAuto: true } }, config, 0, mulberry32(2));
+    expect(withAuto.runStats.manualClicks).toBe(1);
+    expect(withAuto.runStats.autoClicks).toBe(1);
   });
 
   it('ends the run when the boss timer expires', () => {

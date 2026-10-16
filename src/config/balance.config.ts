@@ -23,6 +23,22 @@ export const FIXED_TIMESTEP = 1 / 60;
 
 export const HOT_SWAP_COOLDOWN = 4; // seconds
 export const BOSS_TIMER_DURATION = 30; // seconds
+/** Global minimum effectiveness multiplier for immune pairs (PRD §3.2, Decision D5). */
+export const IMMUNITY_FLOOR = 0.25;
+/** Boss anchor interval (s) while at the bastion perimeter (Decision D1). */
+export const BOSS_ANCHOR_TICK_SEC = 1.0;
+/** Boss anchor damage per tick as a fraction of bastion max HP (Decision D1). */
+export const BOSS_ANCHOR_MAX_HP_FRACTION = 0.06;
+/** Normal enemy leak damage extra as a fraction of bastion max HP (Decision D2). */
+export const ENEMY_CONTACT_MAX_HP_FRACTION = 0.06;
+
+/** Boss timer duration in seconds by floor (PRD §5.1, Decision D1). */
+export function bossTimerForFloor(floor: number): number {
+  if (floor >= 100) return 60;
+  if (floor >= 50) return 45;
+  return 30;
+}
+
 /** Bastion damage taken when an enemy leaks through to the center. */
 export const ENEMY_CONTACT_DAMAGE = 4;
 /** Contact damage grows per floor: ENEMY_CONTACT_DAMAGE x (1 + (floor-1) x this). */
@@ -58,7 +74,7 @@ export function teamLevelCost(currentLevel: number): number {
 }
 
 /** Base projectile damage before atk/level scaling. */
-export const PROJECTILE_BASE_DAMAGE = 40;
+export const PROJECTILE_BASE_DAMAGE = 60;
 /** Base click damage before UP_CLICK and atk scaling. */
 export const CLICK_BASE_DAMAGE = 60;
 /** Held-click repeat interval (ms): caps hold-to-fire at 4 clicks/s. */
@@ -86,6 +102,10 @@ export function critMultiplier(baseCritDmg: number, upCdmgLevel: number): number
   return baseCritDmg * (1 + upCdmgLevel * 0.1);
 }
 
+/** UP_AUTOCLICK cadence in clicks per second by upgrade level (PRD §3.2, §4.1). */
+export const AUTOCLICK_CPS_BY_LEVEL: readonly number[] = [0, 1, 1.5, 2, 3, 4];
+export const AUTOCLICK_MAX_LEVEL = 5;
+
 /**
  * Cost of the NEXT level of a bastion upgrade.
  * Generic geometric curve; per-upgrade base costs below.
@@ -100,20 +120,21 @@ const UPGRADE_BASE_COST: Record<BastionUpgradeId, number> = {
   UP_CDMG: 45,
   UP_GOLD: 50,
   UP_WALL: 60,
+  UP_AUTOCLICK: 25,
 };
 
 export function upgradeCost(id: BastionUpgradeId, currentLevel: number): number {
   return Math.floor(UPGRADE_BASE_COST[id] * Math.pow(1.35, currentLevel));
 }
 
-/** Gold dropped by a normal enemy on floor N. */
+/** Gold dropped by a normal enemy on floor N (Curva v2). */
 export function enemyGoldValue(floor: number): number {
-  return Math.floor(5 + floor * 2);
+  return Math.floor(5 * Math.pow(1.102, floor - 1) + floor * 2);
 }
 
-/** Normal enemy HP on floor N. */
+/** Normal enemy HP on floor N (Curva v2). */
 export function enemyHp(floor: number): number {
-  return Math.floor(20 * Math.pow(1.18, floor - 1));
+  return Math.floor(10 * Math.pow(1.085, floor - 1));
 }
 
 /** Normal enemy speed px/s (slight floor scaling, capped). */
@@ -282,6 +303,11 @@ export const BALANCE = Object.freeze({
   TYPE_MULTIPLIER_SUPER_EFFECTIVE,
   TYPE_MULTIPLIER_NOT_EFFECTIVE,
   TYPE_MULTIPLIER_IMMUNE,
+  IMMUNITY_FLOOR,
+  BOSS_ANCHOR_TICK_SEC,
+  BOSS_ANCHOR_MAX_HP_FRACTION,
+  ENEMY_CONTACT_MAX_HP_FRACTION,
+  bossTimerForFloor,
   WAVE_ENEMY_COUNT_BASE,
   BOSS_HP_MULTIPLIER,
   MINIBOSS_INTERVAL,
@@ -308,4 +334,6 @@ export const BALANCE = Object.freeze({
   GACHA_PITY_LEGENDARY,
   GACHA_PULL_COST,
   STARTING_SEALS,
+  AUTOCLICK_CPS_BY_LEVEL,
+  AUTOCLICK_MAX_LEVEL,
 });

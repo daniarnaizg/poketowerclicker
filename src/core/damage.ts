@@ -70,20 +70,30 @@ export const TYPE_CHART: TypeChart = buildTypeChart();
  * Combined effectiveness of an attacking move that carries 1-2 types
  * against a defender with 1-2 types: multiply every pairwise value
  * (canonical rule for this game; e.g. Fire/Flying vs Grass = 1.5*1.5*0.65*1).
- * Returns 0 if any pair is an immunity.
+ * PRD §3.2, Decision D5: If any pair has an immunity (0), returns min(nonImmuneProduct, 0.25).
  */
 export function getEffectiveness(
   attackerTypes: readonly PokemonType[],
   defenderTypes: readonly PokemonType[],
   chart: TypeChart = TYPE_CHART,
 ): number {
-  let mult = 1;
+  if (attackerTypes.length === 0 || defenderTypes.length === 0) return 1;
+  let hasImmunity = false;
+  let nonImmuneProduct = 1;
   for (const at of attackerTypes) {
     for (const dt of defenderTypes) {
-      mult *= chart[at][dt];
+      const val = chart[at][dt];
+      if (val === 0) {
+        hasImmunity = true;
+      } else {
+        nonImmuneProduct *= val;
+      }
     }
   }
-  return mult;
+  if (hasImmunity) {
+    return Math.min(nonImmuneProduct, 0.25);
+  }
+  return nonImmuneProduct;
 }
 
 /** Attacker-side stats needed by calculateDamage. */

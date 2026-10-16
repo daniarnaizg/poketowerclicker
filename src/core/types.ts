@@ -110,6 +110,40 @@ export interface PlayerPokemon extends Entity {
   shinyActive?: boolean;
 }
 
+export type EnemyKind = 'normal' | 'miniboss' | 'grandboss' | 'runner' | 'shiny';
+
+export interface EnemyDefinition {
+  /** Pokedex number as zero-padded string, e.g. "0019". */
+  id: string;
+  name: string;
+  types: [PokemonType] | [PokemonType, PokemonType];
+  hpFactor?: number;
+  speedFactor?: number;
+}
+
+export type BiomeId = 'RUTA_VERDE' | 'CUEVA_UMBRIA' | 'MONTE_IGNEO' | 'COSTA_RUINAS';
+
+export interface BiomePalette {
+  groundA: string;
+  groundB: string;
+  accent: string;
+  pageBg: string;
+  pageGrid: string;
+  frameAccent: string;
+}
+
+export interface BiomeDefinition {
+  id: BiomeId;
+  name: string;
+  floors: [number, number];
+  typeWeights: Partial<Record<PokemonType, number>>;
+  wild: string[];
+  miniBosses: Record<number, string>;
+  grandBosses?: Record<number, string>;
+  runners: string[];
+  palette: BiomePalette;
+}
+
 export interface Enemy extends Entity {
   types: [PokemonType] | [PokemonType, PokemonType];
   /** Pixels per second toward the arena center. */
@@ -122,6 +156,18 @@ export interface Enemy extends Entity {
   definitionId: string;
   /** Active status ailments (Phase 2); absent when the enemy is clean. */
   statuses?: StatusInstance[];
+  /** Phase 3A: enemy category. */
+  kind?: EnemyKind;
+  /** Phase 3A (D1): true once a boss reaches the bastion perimeter and anchors there. */
+  anchoredAtBastion?: boolean;
+  /** Phase 3A (D1): seconds until next periodic boss strike while anchored. */
+  bossAttackCooldownSec?: number;
+  /** Phase 3C prep: special flags (e.g. typeless for loot runners). */
+  flags?: { typeless?: boolean };
+  /** Phase 3C prep: remaining lifetime for runners. */
+  lifetimeSec?: number;
+  /** Phase 3B prep: current boss phase index. */
+  phaseIndex?: number;
 }
 
 /** Status ailments applied by 3★ Switch-In bonuses and some ultimates. */
@@ -206,6 +252,12 @@ export interface RunStats {
   defeatCause?: 'bastionDestroyed' | 'bossTimerExpired';
   /** First type of the enemy that destroyed the bastion, when known. */
   defeatEnemyType?: PokemonType;
+  /** Phase 3A (I2): boss floors where the boss was actually killed (hp <= 0). */
+  defeatedBossFloors?: number[];
+  /** Phase 3A (§6.3): manual clicks fired by the player. */
+  manualClicks?: number;
+  /** Phase 3A (§6.3): automatic clicks fired by UP_AUTOCLICK. */
+  autoClicks?: number;
 }
 
 export type BastionUpgradeId =
@@ -217,7 +269,8 @@ export type BastionUpgradeId =
   | 'UP_CRIT'
   | 'UP_CDMG'
   | 'UP_GOLD'
-  | 'UP_WALL';
+  | 'UP_WALL'
+  | 'UP_AUTOCLICK';
 
 export const BASTION_UPGRADE_IDS: readonly BastionUpgradeId[] = [
   'UP_CLICK',
@@ -229,10 +282,13 @@ export const BASTION_UPGRADE_IDS: readonly BastionUpgradeId[] = [
   'UP_CDMG',
   'UP_GOLD',
   'UP_WALL',
+  'UP_AUTOCLICK',
 ] as const;
 
-/** Level of each upgrade (0 = not purchased). */
-export type BastionUpgrades = Record<BastionUpgradeId, number>;
+/** Level of each upgrade (0 = not purchased; UP_AUTOCLICK optional for backward compat in tests). */
+export type BastionUpgrades = Record<Exclude<BastionUpgradeId, 'UP_AUTOCLICK'>, number> & {
+  UP_AUTOCLICK?: number;
+};
 
 /**
  * STARTER_SELECT: first launch only. MENU: between runs (Santuario / Caja).
@@ -330,7 +386,7 @@ export interface GameConfig {
 
 export interface GameInput {
   /** Arena click at logical coords (384x384 space). */
-  click?: { x: number; y: number };
+  click?: { x: number; y: number; isAuto?: boolean };
   /** Hot-swap to slot index 0..5. */
   hotSwapIndex?: number;
   /** Fire the active Pokémon's ultimate (Space). */

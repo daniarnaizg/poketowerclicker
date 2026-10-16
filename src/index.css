@@ -4,10 +4,16 @@
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
+body[data-biome="RUTA_VERDE"] { --page-bg: #2858a8; --frame-accent: #68b840; }
+body[data-biome="CUEVA_UMBRIA"] { --page-bg: #1e1a32; --frame-accent: #8a6fd0; }
+body[data-biome="MONTE_IGNEO"] { --page-bg: #3c1c16; --frame-accent: #f08030; }
+body[data-biome="COSTA_RUINAS"] { --page-bg: #1c3e5e; --frame-accent: #58a8d8; }
+
 body {
   font-family: 'Press Start 2P', 'Courier New', monospace;
   color: #303030;
-  background-color: #2858a8;
+  background-color: var(--page-bg, #2858a8);
+  transition: background-color 0.4s ease;
   background-image:
     linear-gradient(#ffffff10 2px, transparent 2px),
     linear-gradient(90deg, #ffffff10 2px, transparent 2px);
@@ -56,4 +62,59 @@ body {
 @keyframes pk-pulse {
   0%, 100% { filter: brightness(1); }
   50% { filter: brightness(1.25); }
+}
+
+/* Low-height widescreen responsive layout (PRD v2.4 Block 3A.1) */
+@media (min-width: 1024px) and (max-height: 1000px) and (min-aspect-ratio: 1.5) {
+  .game-sidebar {
+    width: 44rem !important;
+    max-width: 52vw !important;
+    display: grid !important;
+    grid-template-columns: 1fr 1fr !important;
+    gap: 1rem !important;
+    overflow-y: auto !important;
+    padding: 1rem !important;
+  }
+  .game-sidebar-col-1 {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 0.75rem !important;
+    min-height: 0 !important;
+  }
+  .game-sidebar-col-2 {
+    display: flex !important;
+    flex-direction: column !important;
+    min-height: 0 !important;
+    height: 100% !important;
+  }
+}
+
+/* Compact TeamBar on screens with max-height: 800px */
+@media (max-height: 800px) {
+  .game-hud {
+    padding: 0.5rem !important;
+    gap: 0.375rem !important;
+  }
+  .team-bar {
+    padding: 0.5rem !important;
+  }
+  .team-bar-header {
+    margin-bottom: 0.25rem !important;
+  }
+  .team-bar-grid {
+    gap: 0.375rem !important;
+  }
+  .team-slot-btn {
+    min-height: 0 !important;
+    padding: 0.25rem 0.125rem !important;
+    gap: 0.125rem !important;
+  }
+  .team-bar .pk-sprite,
+  .team-bar .pk-ball.h-10 {
+    width: 1.75rem !important;
+    height: 1.75rem !important;
+  }
+  .team-bar .pk-num {
+    font-size: 16px !important;
+  }
 }

@@ -254,10 +254,17 @@ export function bossFloorsClearedBelow(floorReached: number): number[] {
  * layer guards this); calling twice would pay the ascension bonus twice, though
  * first-clear rewards are naturally idempotent.
  */
-export function settleRun(meta: MetaState, runStats: Pick<RunStats, 'floorReached'>): { meta: MetaState; rewards: RunRewards } {
+export function settleRun(
+  meta: MetaState,
+  runStats: Pick<RunStats, 'floorReached'> & Partial<Pick<RunStats, 'defeatedBossFloors'>>,
+): { meta: MetaState; rewards: RunRewards } {
   const floorReached = Math.max(1, Math.floor(runStats.floorReached));
   const known = new Set(meta.clearedBossFloors);
-  const firstClearFloors = bossFloorsClearedBelow(floorReached).filter((f) => !known.has(f));
+  const eligibleBossFloors =
+    runStats.defeatedBossFloors !== undefined
+      ? runStats.defeatedBossFloors
+      : bossFloorsClearedBelow(floorReached);
+  const firstClearFloors = eligibleBossFloors.filter((f) => !known.has(f));
   const sealsFirstClear = firstClearFloors.reduce(
     (sum, f) => sum + (BIG_BOSS_FLOORS.includes(f) ? SEALS_FIRST_CLEAR_MAJOR_BOSS : SEALS_FIRST_CLEAR_MINIBOSS),
     0,
@@ -270,7 +277,7 @@ export function settleRun(meta: MetaState, runStats: Pick<RunStats, 'floorReache
     meta: {
       ...meta,
       seals: meta.seals + sealsTotal,
-      clearedBossFloors: [...meta.clearedBossFloors, ...firstClearFloors].sort((a, b) => a - b),
+      clearedBossFloors: Array.from(new Set([...meta.clearedBossFloors, ...firstClearFloors])).sort((a, b) => a - b),
       bestFloor: Math.max(meta.bestFloor, floorReached),
       totalRuns: meta.totalRuns + 1,
     },

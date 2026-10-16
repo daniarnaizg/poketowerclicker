@@ -49,7 +49,7 @@ describe('calculateDamage — type effectiveness', () => {
     expect(hit.isSuperEffective).toBe(false);
   });
 
-  it('deals 0 damage against an immune type and never flags it as super effective', () => {
+  it('applies 0.25x immunity floor instead of 0 damage (Decision D5)', () => {
     const hit = calculateDamage(
       { atk: 50, critRate: 0, critDmg: 2, types: [PokemonType.Normal] },
       defender([PokemonType.Ghost]),
@@ -58,7 +58,7 @@ describe('calculateDamage — type effectiveness', () => {
       NO_UPGRADES,
       neverCrit,
     );
-    expect(hit.amount).toBe(0);
+    expect(hit.amount).toBe(25);
     expect(hit.isSuperEffective).toBe(false);
   });
 

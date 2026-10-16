@@ -1,10 +1,10 @@
-# PRD: PokéBastion — Pokémon Idle Defense & Gacha (v2.3)
+# PRD: PokéBastion — Pokémon Idle Defense & Gacha (v2.4)
 
 Documento de Requisitos de Producto para un juego de defensa e incremento progresivo (*Roguelite Idle Defense*) con mecánicas gacha, rotación táctica elemental en tiempo real y arena simétrica.
 
 | Atributo | Detalle |
 | --- | --- |
-| **Estado del Documento** | Borrador Consolidado (v2.3) — Fase 1 completada · Fase 2 en implementación · Fases 3+ re-planificadas (§8, §9) |
+| **Estado del Documento** | Borrador Consolidado (v2.4) — Fase 1 y Fase 2 completadas (commit `d800ce9`) · Fase 3A re-planificada tras auditoría de simulador (§8, §9, Anexo A) |
 | **Plataforma** | Web App (Desktop & Mobile PWA) — 100% Client-Side Execution |
 | **Tooling & Build** | **Vite** + **pnpm** + **TypeScript** |
 | **UI & Estado** | **Preact** (o React) + **Tailwind CSS** + **Zustand** |
@@ -56,7 +56,7 @@ Todo el bucle de juego, físicas, cálculo de daño y guardado primario se ejecu
 Al iniciar partida por primera vez, el jugador elige **1 Pokémon Principal** entre un set clásico (por ejemplo: *Charmander*, *Squirtle* o *Bulbasaur*). Este Pokémon es su primer combatiente y define su tipo inicial.
 
 #### Sistema Gacha (Santuario de Invocación / Pelipper Express)
-* **Moneda Gacha:** *Sellos de Reclutamiento* (o *Gemas Iris*), obtenidos al derrotar Mini-Bosses y Grandes Bosses por primera vez, logros, ascensiones o abatiendo enemigos *Shiny* salvajes.
+* **Moneda Gacha:** *Sellos de Reclutamiento* (o *Gemas Iris*), obtenidos al **abatir (matar)** Mini-Bosses y Grandes Bosses por primera vez (`defeatedBossFloors`, nunca por fuga), logros, ascensiones o abatiendo enemigos *Shiny* salvajes.
 * **Sistema de Duplicados (Despertar / Estrellas):** Obtener un Pokémon repetido otorga **Fragmentos de Vínculo** de esa especie para subir su rango de estrellas (1★ a 5★).
 * **Sistema Pity:** Garantía de obtener al menos un Pokémon ★★★ cada 30 tiradas y un ★★★★ cada 80 tiradas.
 
@@ -85,7 +85,9 @@ A diferencia de la evolución (que se produce exclusivamente mediante el Nivel d
 Cada especie de la colección cuenta con atributos específicos que escalan con el Nivel de Equipo y las mejoras del Bastión:
 
 * **Ataque Base (`ATK`):** Multiplicador de daño para el disparo automático y el clic.
-* **Clic (bonus táctico):** El clic hace ~2× el daño de un disparo automático del mismo ATK: acelera la run, pero no es requisito para sobrevivir. Mantener pulsado dispara un clic cada 250 ms (máx. 4 clics/s).
+* **Clic (bonus táctico) y Autoclick ergonómico:** El clic hace ~1.5×–2× el daño de un disparo automático del mismo ATK: acelera la run, pero **el auto-disparo por sí solo debe ser capaz de limpiar los primeros pisos** (el clic no es requisito para sobrevivir al inicio).
+  * **Hold-to-fire gratis:** Mantener pulsado (`pointerdown` + seguimiento en `pointermove`) dispara un clic cada 250 ms (máx. 4 clics/s) siguiendo al puntero.
+  * **Autoclick (ergonomía, Fase 3A):** Desbloqueo base permanente (o coste simbólico de Nv. 1) cuya **cadencia se mejora con oro en la run** (`UP_AUTOCLICK`: 1 → 1.5 → 2 → 3 → 4 clics/s, con tope por debajo o igual al hold manual). En escritorio dispara automáticamente en la posición del cursor (*hover*); en pantallas táctiles activa el modo **"fijar punto de apuntado"** (un toque fija la retícula y dispara solo hasta que se toque otro punto).
 * **Velocidad de Ataque (`SPD`):** Cadencia base de disparo (ej. *Pikachu* alta cadencia; *Snorlax* cadencia lenta pero daño masivo).
 * **Probabilidad y Daño Crítico Base (`CRIT` / `CDMG`):** Afinidad innata para asestar golpes críticos.
 * **Patrón de Ataque (`PATTERN`):**
@@ -93,7 +95,7 @@ Cada especie de la colección cuenta con atributos específicos que escalan con 
   * *Artillero (AoE):* Bombas parabólicas con explosión en área en zonas densas.
   * *Pulso / Cuerpo a Cuerpo:* Ondas expansivas de corto alcance y alto daño.
   * *Cadena / Rebote:* Proyectiles que saltan entre múltiples objetivos.
-* **Tipo Elemental (1 o 2 tipos):** Multiplicadores de tabla de tipos (×1.5 Súper Eficaz, ×0.65 No muy eficaz, ×0 Inmune según corresponda).
+* **Tipo Elemental (1 o 2 tipos) y Suelo de Inmunidad Global (`×0.25`):** Multiplicadores de tabla de tipos (`×1.5` Súper Eficaz, `×0.65` No muy eficaz). Para evitar *soft-locks* cuando el auto-disparo apunta al enemigo más cercano, **no existe daño `×0` en combate normal ni contra jefes**: si *cualquier* par de tipos (atacante bitipo × defensor bitipo) tiene inmunidad canónica, la efectividad combinada se calcula como `min(producto de los pares no inmunes, 0.25)` (`IMMUNITY_FLOOR = 0.25`). Así nunca es peor que una doble resistencia severa ni produce un `0.25 × 0.25 = 0.0625`.
 * **Habilidad Definitiva (Ultimate):** Movimiento insignia con **enfriamiento en segundos por especie** (30 s en la forma inicial, 26 s en la primera evolución, 22 s en la final; 26 s en especies sin evolución), acelerable con pasivas `ULT_CHARGE` (ej. *Llamarada*, *Hidrobomba*, *Tormenta Floral*, *Rayo*).
 * **Nivel de Evolución Canónico:** Umbral de Nivel de Equipo requerido para evolucionar (ej. Lv. 16/36, Lv. 7/10, Lv. 30/55).
 
@@ -107,12 +109,16 @@ Para evitar la asimetría de distancias de los lienzos panorámicos, la zona de 
 * La distancia a cualquier borde exterior es idéntica en 360° (192 px de radio).
 * Los enemigos emergen sobre una circunferencia de radio 192 centrada en la arena y avanzan hacia el centro con velocidades homogéneas. Las cuatro **esquinas** del cuadrado quedan fuera de esa circunferencia y no se recorren nunca: es el lugar del decorado de fondo (§9.2.2).
 
-#### Panel Lateral de Control (Configurable Izquierda / Derecha)
+#### Panel Lateral de Control (Configurable Izquierda / Derecha y Responsive 1080p)
 El resto de la pantalla alberga la interfaz:
 * **Barra de Equipo de 6 Pokémon:** Retratos (`Normal.png`), tipo elemental, nivel de evolución actual, barra de HP y botón de relevo directo (*Hot-Swap* mediante clics o teclas 1 a 6).
 * **Medidor de Habilidad Definitiva:** Botón activador (`Espacio` o clic secundario).
 * **Controles de Mejora de Oro:** Botón único de *Nivel de Equipo* y lista de mejoras del Bastión.
 * **Ajuste en Opciones:** Posición del Panel: *Derecha* (predeterminado) o *Izquierda* (modo accesibilidad / zurdos para juego móvil horizontal).
+* **Diseño Responsive en Escritorio (1080p / Portátiles):**
+  * **Red de seguridad vertical:** Uso de `h-dvh` en lugar de `h-screen`, `min-height` garantizado en el panel de Mejoras (al menos 3 filas + botón de Nivel de Equipo) y scroll en el contenedor lateral si el alto del viewport es insuficiente (evitando el colapso del grid de mejoras en 1366×768 o 1536×864).
+  * **Layout de 2 columnas en viewports panorámicos bajos** (`min-aspect-ratio: 16/10` y `max-height: 1000px`, ej. 1920×969 con barra de navegador): el panel lateral aprovecha los ~600 px horizontales sobrantes dividiéndose en **dos columnas** (*HUD + Equipo* a la izquierda, *Mejoras* a la derecha), mostrando las 9+ mejoras sin scroll interno.
+  * **Tarjetas de Equipo compactas** en alturas `≤ 800px` (1 fila o grid compacto con retrato y barra, ahorrando ~200 px verticales sin reducir el tamaño de la fuente *Press Start 2P*).
 
 ```
 +--------------------------+-------------------------------------+
@@ -129,7 +135,7 @@ El resto de la pantalla alberga la interfaz:
 |                          |  NIVEL DE EQUIPO (Nv. 34) [Subir]   |
 |                          |  MEJORAS DEL BASTIÓN (Oro)          |
 +--------------------------+-------------------------------------+
-   (Arena fija cuadrada)        (Panel lateral configurable L/R)
+   (Arena fija cuadrada)        (Panel lateral 1 o 2 cols según viewport)
 ```
 
 #### Mecánica de Relevo en Combate (Hot-Swap)
@@ -152,24 +158,26 @@ El resto de la pantalla alberga la interfaz:
 
 #### Mejoras Globales del Bastión (Con Oro)
 
-| Identificador | Nombre | Función de Escalado |
+| Identificador | Nombre en UI (Alias diseño) | Función de Escalado |
 | :--- | :--- | :--- |
-| `UP_CLICK` | Golpe Firme | Daño y radio de explosión al hacer clic (toma el elemento y `ATK` del Pokémon activo). |
-| `UP_HP` | Vitalidad | Salud máxima del Bastión y regeneración pasiva (2%/s). |
-| `UP_MULTI` | Ataque Múltiple | Comportamiento según el patrón de ataque (de 1 a 9):<br>• *Francotirador:* Dispara a `N` enemigos simultáneos.<br>• *Artillero (AoE):* Lanza `N` bombas parabólicas a distintos grupos.<br>• *Pulso:* Emite `N` ondas concéntricas sucesivas rápidas.<br>• *Cadena:* El proyectil rebota `N` veces adicionales. |
-| `UP_ARROW` | Potencia Elemental | Daño base del proyectil del Pokémon activo. |
-| `UP_SPD` | Cadencia | Multiplicador de velocidad de ataque global. |
-| `UP_CRIT` / `UP_CDMG` | Ojo Certero / Furia | Probabilidad y multiplicador de daño crítico. |
-| `UP_GOLD` | Amuleto Moneda | Multiplicador de oro obtenido por enemigo eliminado. |
+| `UP_CLICK` | **Daño de clic** (*Golpe Firme*) | +10% daño y mayor radio de explosión al hacer clic por nivel (toma el elemento y `ATK` del Pokémon activo). |
+| `UP_HP` | **Muralla** (*Vitalidad*) | +20 HP máximos del Bastión por nivel (con curación equivalente) y regeneración pasiva base de **3%/s** (`BASTION_REGEN_FRACTION_PER_SEC = 0.03`). |
+| `UP_MULTI` | **Multidisparo** (*Ataque Múltiple*) | Comportamiento según el patrón de ataque (de 1 a 9):<br>• *Francotirador:* Dispara a `N` enemigos simultáneos.<br>• *Artillero (AoE):* Lanza `N` bombas parabólicas a distintos grupos.<br>• *Pulso:* Emite `N` ondas concéntricas.<br>• *Cadena:* El proyectil rebota `N` veces adicionales. |
+| `UP_ARROW` | **Flechas** (*Potencia Elemental*) | +8% daño base del proyectil del Pokémon activo por nivel. |
+| `UP_SPD` | **Cadencia** | +5% velocidad de ataque global por nivel. |
+| `UP_CRIT` / `UP_CDMG` | **Precisión / Furia** | +1% prob. de crítico (tope 90%) y +10% multiplicador de daño crítico por nivel. |
+| `UP_GOLD` | **Codicia** (*Amuleto Moneda*) | +10% oro obtenido por enemigo eliminado por nivel. |
+| `UP_WALL` | **Fortaleza** | +10% de HP máximo del Bastión por nivel (con curación inmediata equivalente). |
+| `UP_AUTOCLICK` | **Autoclick** *(Fase 3A)* | Dispara clics automáticos en el cursor (escritorio) o punto fijado (táctil); subir nivel aumenta la cadencia (1 → 1.5 → 2 → 3 → 4 clics/s). |
 
-* **Presión de piso y respiro:** el daño de contacto enemigo escala con el piso (`ENEMY_CONTACT_DAMAGE × (1 + (piso − 1) × ENEMY_CONTACT_DAMAGE_FLOOR_SCALE)`), la regeneración pasiva del Bastión se pausa durante el *respiro* entre oleadas (la carga de Definitiva sigue corriendo) y `UP_WALL` (Fortaleza) añade +10% de HP máximo por nivel con una curación equivalente.
+* **Presión de piso, fugas y respiro (Decisión D2):** para evitar que la estrategia óptima sea comprar solo HP (`UP_HP` / `UP_WALL`) y avanzar pisos "tragándose fugas" sin matar enemigos, el daño de contacto al filtrarse un enemigo escala como **fracción del HP máximo del Bastión + escalado por piso** (de modo que tanquear una oleada entera sin bajas destruya el Bastión). La regeneración pasiva del Bastión se pausa durante el *respiro* entre oleadas (la carga de Definitiva sigue corriendo).
 
 ---
 
 ### 4.2. Flujo de Derrota y Bucle Roguelite (Idle vs. Competitivo)
 
 1. **Condición de Fin de Run (*Game Over*)**:
-   * Si la salud del Bastión llega a 0 **o** expira el cronómetro de 30 segundos frente a un Mini-Boss o Gran Boss, la run termina inmediatamente. No existe retroceso de oleada pasivo infinito.
+   * Si la salud del Bastión llega a 0 **o** expira el cronómetro frente a un Mini-Boss o Gran Boss, la run termina inmediatamente. No existe retroceso de oleada pasivo infinito.
 2. **Pantalla de Resumen y Viralidad Social**:
    * Al caer, se despliega una tarjeta de resultados estilizada (*Ficha de Entrenador*):
      * Piso máximo alcanzado y enemigo abatidor.
@@ -187,8 +195,8 @@ El resto de la pantalla alberga la interfaz:
 
 $$\text{Runas} = \left\lfloor \left(\frac{\text{OleadaMax}}{5}\right)^{1.5} \right\rfloor$$
 
-* Cada Runa otorga un +4% de daño global acumulativo y puede asignarse en 3 ramas:
-  * **Entrenador:** Potenciación de estadísticas base de los Pokémon y velocidad de recarga de la Definitiva.
+* **Modelo económico de las Runas (Resolución P3):** Las Runas son **moneda que se gasta** en el Árbol de Habilidades (no otorgan un bono pasivo gratuito por mera acumulación, evitando una inflación pasiva de +356% al llegar al piso 100). Los bonos de daño global y utilidad provienen de desbloquear nodos en las 3 ramas del Árbol:
+  * **Entrenador:** Potenciación de estadísticas base de los Pokémon, velocidad de recarga de la Definitiva y desbloqueo base del Autoclick ergonómico.
   * **Estratega:** Reducción de enfriamiento de *Hot-Swap*, potencia del *Switch-In Bonus* y Relevo Automático Táctico.
   * **Explorador:** Aumento de drop de oro, probabilidad de enemigos *Shiny* y Cupones Gacha adicionales.
 * **Persistencia:** Los Pokémon de la Caja, sus Estrellas de Despertar y las mejoras del Árbol de Runas se conservan permanentemente.
@@ -197,14 +205,15 @@ $$\text{Runas} = \left\lfloor \left(\frac{\text{OleadaMax}}{5}\right)^{1.5} \rig
 
 ## 5. Estructura de Pisos, Jefes (10 / 50 / 100) y Modos de Juego
 
-### 5.1. Jerarquía de Pisos
+### 5.1. Jerarquía de Pisos y Anclaje de Jefes (Decisión D1)
 
 | Tipo de Piso | Pisos | Características del Encuentro |
 | :--- | :--- | :--- |
 | **Oleada Normal** | Todos excepto múltiplos de 10 | Horda de 10 enemigos salvajes del bioma actual avanzando en 360°. |
-| **Mini-Boss** | **Cada 10 pisos** (10, 20, 30, 40, 60, 70, 80, 90...) | Jefe de zona con ×10 HP y cronómetro de 30s base. Otorga oro extra y Sellos Gacha en la primera victoria. |
-| **Gran Boss (Major Boss)** | **Pisos 50 y 100** (y cada 50 pisos en la Torre: 150, 200, 250…) | Jefes principales de hito con cambio de fase elemental y mecánicas de escudo que exigen rotación táctica activa. |
+| **Mini-Boss** | **Cada 10 pisos** (10, 20, 30, 40, 60, 70, 80, 90...) | Jefe de zona con ×10 HP y cronómetro de **30 s**. **Se ancla al radio del Bastión** al llegar y lo golpea periódicamente hasta morir o agotar el tiempo. Otorga oro extra y Sellos Gacha al ser **abatido** por primera vez. |
+| **Gran Boss (Major Boss)** | **Pisos 50 y 100** (y cada 50 pisos en la Torre: 150, 200, 250…) | Jefes principales de hito (cronómetro de **45 s** en piso 50 y **60 s** en piso 100) con cambio de fase elemental y anclaje en el Bastión que exigen rotación táctica activa. |
 
+* **Mecánica de Anclaje de Jefe (Decisión D1):** Un jefe (Mini-Boss o Gran Boss) **nunca se autodestruye ni cuenta como "fuga" al tocar el Bastión**. Cuando alcanza `BASTION_DAMAGE_R` (24 px del centro), se detiene en el perímetro y **golpea periódicamente al Bastión** (1 golpe/s equivalente al **5–8% del HP máximo del Bastión**, respetando el escudo de 3★ si está activo) mientras el cronómetro de jefe sigue corriendo. La única forma de superar un piso de jefe (y de registrar su primera victoria para Sellos en `settleRun`) es **reducir su HP a 0 antes de que el Bastión caiga o el reloj llegue a 0**.
 * **Respiro entre oleadas:** al limpiar un piso el siguiente no aparece de golpe: hay **2,75 s de respiro** (la carga de Definitiva sigue corriendo; la regeneración pasiva se pausa) antes de invocar el nuevo piso. El jugador puede adelantarlo con el botón *Siguiente Piso* o desactivar el avance automático con el chip *AUTO* para esperar de forma indefinida.
 
 ### 5.2. Modo Campaña / Expedición por Biomas
@@ -229,7 +238,7 @@ $$\text{Runas} = \left\lfloor \left(\frac{\text{OleadaMax}}{5}\right)^{1.5} \rig
   * Mantiene Mini-Bosses cada 10 pisos y Grandes Bosses cada 50 pisos (50, 100, 150, 200...).
 * **Diferenciación:**
   * **Registro de Récord:** la derrota termina el intento en **todos** los modos (§4.2); en la Torre, además, el piso alcanzado se registra como récord (y, en la Fase 4, en el Ranking Global).
-  * **Mutadores de Piso (cada 10 pisos) y Terrenos:** modificadores que alteran el combate (ej. *Inmunidad Elemental*, *Suelo Volcánico*, *Inversión de Tipos*). Catálogo, reglas y apilado en §9.3 y §9.9.
+  * **Mutadores de Piso (cada 10 pisos) y Terrenos:** modificadores que alteran el combate (ej. *Resistencia Extrema*, *Suelo Volcánico*, *Inversión de Tipos*). Catálogo, reglas y apilado en §9.3 y §9.9.
 * *(Roadmap)* **Modo Desafío Diario:** Evento rotativo con semilla fija y presupuesto inicial cerrado para una competencia igualada diaria.
 
 ---
@@ -282,14 +291,15 @@ $$\text{Runas} = \left\lfloor \left(\frac{\text{OleadaMax}}{5}\right)^{1.5} \rig
     "final_floor": 142,
     "total_gold_earned": 2840000,
     "team_state": [{"id": "0006", "stars": 4, "team_level": 120}],
-    "bastion_levels": {"UP_CLICK": 50, "UP_ARROW": 110, "UP_HP": 75},
-    "total_clicks": 2150
+    "bastion_levels": {"UP_CLICK": 50, "UP_ARROW": 110, "UP_HP": 75, "UP_AUTOCLICK": 4},
+    "manual_clicks": 850,
+    "auto_clicks": 1300
   }
   ```
 * **Comprobación Serverless Rápida (<5 ms)**:
   1. **Consistencia de Oro:** Verifica que el oro total ganado coincida matemáticamente con las mejoras y niveles reportados más el saldo final.
   2. **Umbral Fisiológico de Tiempo:** Comprueba que la duración de la run no sea inferior al tiempo físico mínimo requerido para completar las oleadas declaradas.
-  3. **DPS Sanity Check:** Comprueba que el DPS teórico máximo de ese equipo y mejoras pueda eliminar al jefe del `final_floor` dentro de su temporizador. La cota usa los **topes por categoría** del pipeline de modificadores (§9.3.1) y un presupuesto máximo de oro por fugitivos de botín (§9.6).
+  3. **DPS Sanity Check:** Comprueba que el DPS teórico máximo de ese equipo y mejoras (separando `manual_clicks` y `auto_clicks` según la cota de cadencia de `UP_AUTOCLICK`) pueda eliminar al jefe del `final_floor` dentro de su temporizador. La cota usa los **topes por categoría** del pipeline de modificadores (§9.3.1) y un presupuesto máximo de oro por fugitivos de botín (§9.6).
   4. **Reconstrucción determinista:** clima, terreno, mutadores y eventos especiales son funciones puras de `(seed, bioma, piso)` (§9.1.1, §9.3.5); el servidor los recalcula con el mismo código. El payload añade `mode`, `autoSwap` y `schemaVersion`.
 * La función serverless importa las mismas fórmulas matemáticas de `src/core/damage.ts` garantizando consistencia absoluta sin duplicar código.
 
@@ -340,41 +350,56 @@ export interface PokemonDefinition {
 ## 8. Hoja de Ruta (Roadmap de Desarrollo)
 
 ### Fase 1: Inicialización, Core Engine y MVP *(completada; commit `9eafe53`)*
-* Configuración inicial del repositorio con **pnpm**, **Vite**, **TypeScript**, **Preact** y **Tailwind CSS**.
-* Implementación del **Core Headless** determinista (fórmulas elementales, Nivel de Equipo unificado y evolución canónica).
-* Motor de render en **Canvas 2D** con arena simétrica cuadrada (384×384 px lógicos) y generación 360°.
-* Barra lateral de equipo (1-6) con mecánica de **Hot-Swap** y **Ataque de Entrada**.
-* Selector inicial de Pokémon (*Starter*).
-* Flujo de derrota con tarjeta viral de resultados (*Ficha de Entrenador*) y cálculo de Runas.
+* [x] Configuración inicial del repositorio con **pnpm**, **Vite**, **TypeScript**, **Preact** y **Tailwind CSS**.
+* [x] Implementación del **Core Headless** determinista (fórmulas elementales, Nivel de Equipo unificado y evolución canónica).
+* [x] Motor de render en **Canvas 2D** con arena simétrica cuadrada (384×384 px lógicos) y generación 360°.
+* [x] Barra lateral de equipo (1-6) con mecánica de **Hot-Swap** y **Ataque de Entrada**.
+* [x] Selector inicial de Pokémon (*Starter*).
+* [x] Flujo de derrota con tarjeta viral de resultados (*Ficha de Entrenador*) y cálculo de Runas.
 
-### Fase 2: Sistema Gacha, Despertar y Definitivas *(en implementación)*
-* **Santuario Gacha** con probabilidades por rareza y contador de *Pity*.
-* Gestión de **Caja Pokémon (Colección)** para configurar el equipo de 6.
-* Sistema de **Estrellas de Despertar (1★ a 5★)**: desbloqueo de pasivas de banquillo, mejoras de proyectil y *Aura Apex* (5★). *(El Shiny se incorpora en la Fase 3C; ver `docs/PHASE2_HANDOFF.md` para el contrato de datos.)*
-* Implementación de la **Habilidad Definitiva** con enfriamiento por especie (segundos) acelerable con pasivas `ULT_CHARGE`.
+### Fase 2: Sistema Gacha, Despertar y Definitivas *(completada; commits `7a089f9` / `d800ce9`)*
+* [x] **Santuario Gacha** con probabilidades por rareza (`60/30/8/2`) y contador de *Pity* (`30/80`).
+* [x] Gestión de **Caja Pokémon (Colección)** para configurar el equipo de 6 con regla de línea evolutiva única (`getEvolutionChain`).
+* [x] Sistema de **Estrellas de Despertar (1★ a 5★)**: desbloqueo de pasivas de banquillo (`2★`), estados de relevo (*Switch-In*, `3★`), evolución de patrón (`4★`) y *Aura Apex* (`5★` + doble pasiva). *(Contrato de datos `shinyOwned/shinyActive` listo en `META_VERSION = 2` para Fase 3C.)*
+* [x] Implementación de la **Habilidad Definitiva** con enfriamiento por especie (`30/26/22 s`) acelerable con pasivas `ULT_CHARGE`.
+* [x] Persistencia versionada y migración con `idb-keyval`.
 
-### Fase 3: Mundo, Modificadores, Encuentros y Torre *(re-planificada en v2.3)*
+### Fase 3: Mundo, Modificadores, Encuentros y Torre *(re-planificada en v2.4 tras auditoría del simulador)*
 
-> La Fase 3 original agrupaba demasiado (biomas, jefes multifase, Torre, mutadores, automatización) y daba por hecha infraestructura que el código aún no tiene (ver **Anexo A**: enemigos sin especie, RNG compartido, economía que no llega al piso 100). Se divide en **cuatro sub-fases entregables**; cada una es jugable por sí sola y desbloquea la siguiente. El diseño detallado vive en la **§9**.
+> La auditoría post-Fase 2 sobre el simulador demostró que "piso alcanzado" medía cuánto aguantaba el Bastión tragándose fugas (0% bajas desde el piso 21–30), que los jefes recorrían los 168 px en 2,8–6,7 s eliminándose por contacto sin que el reloj de 30 s pudiera expirar nunca, y que los Sellos de jefe se otorgaban por superar el piso sin abatir al jefe. Por ello, **3A se reestructura en bloques secuenciales**: primero *Quick Wins* (inmunidad global `×0.25` y responsive 1080p), luego el replanteamiento de combate y **"Curva v2"** (anclaje de jefes D1, peso de fugas D2, viabilidad idle D3 y simulador por bajas), después **Autoclick** y finalmente las fundaciones de mundo (RNG por canal, `EnemyDefinition`/biomas, sprites locales y fondos).
 
-**Orden y razón:** 3A es la base técnica (sin ella nada de lo demás se puede validar ni hacer determinista). 3B introduce el pipeline de modificadores, del que cuelgan clima, sinergias y jefes. 3C (fugitivos y Shiny) necesita especies reales en el núcleo y el director de encuentros. 3D (Torre + relevo automático) va al final porque el relevo automático solo es interesante cuando ya hay clima, fases de jefe y mutadores que lo hagan decidir.
+#### 3A — Quick Wins, "Curva v2" (Combate Real) y Fundaciones del Mundo
+*Objetivo: que el progreso dependa de abatir enemigos y jefes, que ningún tipo haga 0 de daño, que el layout sea cómodo en 1080p y que el núcleo soporte biomas y especies locales.*
 
-#### 3A — Fundaciones del Mundo
-*Objetivo: que el núcleo conozca biomas y especies, que la economía llegue al piso 100 y que cada bioma se vea distinto.*
+**Bloque 3A.1 — Higiene y Quick Wins de UX/Combate:**
+* [ ] **Higiene de repositorio:** `.gitattributes` (`* text=auto eol=lf`) y verificación de `pnpm test` + `pnpm build` en verde.
+* [ ] **Suelo de inmunidad global (`×0,25`)** en `getEffectiveness` (`min(producto de pares no inmunes, 0.25)`), eliminando los *soft-locks* del auto-disparo en el 52% del roster (§3.2, §9.5).
+* [ ] **Responsive del panel lateral a 1080p:** `h-dvh`, `min-height` de seguridad en el panel de Mejoras con scroll lateral general (A), layout de **2 columnas** (*HUD+Equipo* | *Mejoras*) en viewports panorámicos bajos (`min-aspect-ratio: 16/10` y `max-height: 1000px`) (B) y tarjetas de Equipo compactas en `≤800px` (C) (§3.3).
 
-* [ ] **RNG por canal y por piso** con `seed` propia de cada run (§9.1.1).
-* [ ] **`EnemyDefinition` y `BiomeDefinition`** data-driven; los enemigos tienen especie real en el núcleo y desaparece el mapeo tipo→especie del renderer (§9.1.2–9.1.3).
-* [ ] **Biomas 1 y 2 jugables** (Ruta Verde y Cueva Umbría, pisos 1–49) con pesos de tipo por bioma.
-* [ ] **`pnpm run sync:pokemon`**: sprites locales (fin del hotlink a `raw.githubusercontent.com`), carga por bioma y `CREDITS` (§7.4).
-* [ ] **Simulador headless `pnpm run test:balance`** y **"Curva v2"** de economía (§9.1.5). Punto de partida: `docs/analysis/sim-baseline.ts`.
-* [ ] **Fondos procedurales y tema web por bioma** (§9.2).
+**Bloque 3A.2 — Reglas de Combate (D1–D3) y "Curva v2" de Economía:**
+* [ ] **Anclaje de Jefes en el Bastión (D1):** el jefe no desaparece al llegar a `BASTION_DAMAGE_R`; se ancla y golpea cada segundo (`5–8%` del HP máx. del Bastión) hasta morir o agotar su reloj (30/45/60 s).
+* [ ] **Victoria real sobre Jefes (I2):** `RunStats` registra `defeatedBossFloors` solo cuando `boss.hp <= 0`; `settleRun` otorga Sellos de primera victoria únicamente por jefes **abatidos**.
+* [ ] **Peso de las fugas (D2) y viabilidad Idle inicial (D3):** el daño de contacto de enemigos normales escala como fracción del HP máx. del Bastión + piso (impidiendo que comprar solo HP gane a comprar daño), y el auto-disparo inicial abate ≥70% del piso 1 sin clics.
+* [ ] **Simulador `pnpm run test:balance` v2 y "Curva v2" (§9.1.5):** instrumentación de bajas vs. fugas por tramo, jefes abatidos, uso de Definitiva/relevos en el bot y recalibración de curvas de HP/oro/costes.
+
+**Bloque 3A.3 — Ergonomía de Puntero y Autoclick:**
 * [x] Entrada con `pointerdown` (hold-to-fire, máx. 4 clics/s; cubre ratón y táctil).
+* [ ] **Seguimiento `pointermove`** durante hold-to-fire en `App.tsx`.
+* [ ] **Mejora de Autoclick (`UP_AUTOCLICK`):** desbloqueo base permanente/simbólico + cadencia mejorable con oro en la run (1 → 1.5 → 2 → 3 → 4 clics/s) en posición del cursor (escritorio) y modo **"fijar punto de apuntado"** (táctil), separando `manual_clicks` y `auto_clicks` en `RunStats`/`RunProof` (§3.2, §6.3).
 
-**Criterios de aceptación:**
-1. Misma `seed` + inputs de jugador distintos ⇒ mismas oleadas y eventos por piso hasta que una de las runs termine.
-2. Los perfiles de bot de §9.1.5 alcanzan los hitos objetivo (en particular: un bot **sin clics** ya no muere antes del primer jefe).
-3. En producción no hay peticiones a `raw.githubusercontent.com`.
-4. El fondo se compone con un único `drawImage` por frame (sin bucles de tiles por frame).
+**Bloque 3A.4 — Fundaciones del Mundo y Assets Locales:**
+* [ ] **RNG por canal y por piso** (`WAVE`, `SPECIAL`, `COMBAT`) con `seed` propia de cada run (§9.1.1).
+* [ ] **`EnemyDefinition` y `BiomeDefinition`** data-driven; enemigos con especie real en el núcleo y eliminación del mapeo tipo→especie del renderer (§9.1.2–9.1.3).
+* [ ] **Biomas 1 y 2 jugables** (Ruta Verde y Cueva Umbría, pisos 1–49) con pesos de tipo por bioma.
+* [ ] **`pnpm run sync:pokemon`**: sprites locales en `public/sprites/` (fin del hotlink a `raw.githubusercontent.com`), carga por bioma y `CREDITS.md` (§7.4).
+* [ ] **Fondos procedurales pre-renderizados (`buildBackdrop`) y tema web por bioma** (§9.2).
+
+**Criterios de aceptación de 3A (basados en bajas reales):**
+1. **Determinismo por canal:** Misma `seed` + inputs de jugador distintos ⇒ mismas oleadas y eventos por piso hasta que una de las runs termine.
+2. **Progreso por combate, no por fugas:** En todos los perfiles del simulador (§9.1.5), la política de compra ofensiva/equilibrada supera en piso alcanzado y en jefes abatidos a la política de "comprar solo HP/Muralla".
+3. **Métricas de bajas:** Un bot **sin clics** (solo starter) abate ≥70% de los enemigos en los pisos 1–10 y **abate** (mata) al Mini-Boss del piso 10 antes de que expire el reloj de 30 s.
+4. **Cero inmunidades nulas y UI 1080p:** Ningún par de tipos devuelve `0` en `getEffectiveness` (mínimo `0.25`), y a `1920×969` las mejoras del Bastión son visibles sin colapso vertical.
+5. **Autonomía de red y render:** En producción no hay peticiones a `raw.githubusercontent.com`, y el fondo se dibuja con un único `drawImage` por frame.
 
 #### 3B — Modificadores de Campo, Sinergias y Jefes
 *Objetivo: que el relevo elemental tenga más razones para ocurrir que "este enemigo es débil a X".*
@@ -383,13 +408,13 @@ export interface PokemonDefinition {
 * [ ] **Climas** (4) con calendario por bioma, banner, partículas y chip en el HUD (§9.3.2).
 * [ ] **Biomas 3 y 4** (Monte Ígneo, Costa y Ruinas): la campaña queda completa hasta el piso 100.
 * [ ] **Sinergias de Tipo** (§9.4).
-* [ ] **Jefes multifase** de los pisos 50 y 100 y **suelo de inmunidad** para jefes (§9.5).
+* [ ] **Jefes multifase** de los pisos 50 y 100 sobre la mecánica de anclaje D1 (§9.5).
 * [ ] **Pista de Relevo** en la barra de equipo (§9.3.6).
 
 **Criterios de aceptación:**
-1. Un bot con el perfil "meta máxima" completa los pisos 1–100 en el simulador; con el perfil "primera run" no lo hace.
+1. Un bot con el perfil "meta máxima" abate los jefes y completa los pisos 1–100 en el simulador (con tasa de bajas ≥70%); con el perfil "primera run" no lo hace.
 2. Con el mismo presupuesto de estrellas, ninguna composición de equipo (monotipo, bitipo, cobertura de 5+ tipos) tiene un piso mediano >15% superior al de las demás.
-3. Ningún equipo puede quedarse a 0 de daño total contra un jefe (soft-lock imposible).
+3. Ningún equipo puede quedarse a 0 de daño total contra ningún enemigo ni jefe (garantizado por diseño desde 3A.1 con `IMMUNITY_FLOOR = 0.25`).
 
 #### 3C — Encuentros Especiales y Shiny
 *Objetivo: momentos de sorpresa dentro de la run y un coleccionable de suerte en el gacha.*
@@ -409,7 +434,7 @@ export interface PokemonDefinition {
 
 * [ ] **Modo Torre** (Infinito) con jefes cada 50 pisos y registro de récord local (§9.9).
 * [ ] **Terrenos** (4) en pisos de jefe y en la Torre (§9.3.3) y **Mutadores** por década (§9.9).
-* [ ] **Relevo Automático Táctico** en el Árbol de Runas, reutilizando la puntuación de la Pista de Relevo (§9.8).
+* [ ] **Árbol de Runas funcional** (gasto de Runas como moneda en ramas Entrenador, Estratega y Explorador) incluyendo el **Relevo Automático Táctico** (§4.3, §9.8).
 
 **Criterios de aceptación:**
 1. Pisos > 100 jugables sin cambios de código entre pisos (todo es dato: bioma cíclico, mutadores por década).
@@ -423,7 +448,7 @@ export interface PokemonDefinition {
 * Modo Desafío Diario (*Daily Dungeon*) con presupuesto inicial cerrado y semilla comunitaria.
 
 **Requisitos heredados de la Fase 3 (sin ellos esta fase no es viable):**
-* `RunProof` incluye `seed`, `mode`, `autoSwap` y `schemaVersion`; el validador reconstruye calendario de clima, terreno y mutadores con las mismas funciones puras que el cliente (§9.3.5).
+* `RunProof` incluye `seed`, `mode`, `autoSwap`, `manual_clicks`, `auto_clicks` y `schemaVersion`; el validador reconstruye calendario de clima, terreno y mutadores con las mismas funciones puras que el cliente (§9.3.5).
 * La cota de DPS y de oro del validador usa los **topes por categoría** del pipeline de modificadores y un presupuesto máximo de oro por fugitivos (§9.6).
 * El Desafío Diario deriva los canales `WAVE` y `SPECIAL` de la semilla diaria; el canal `COMBAT` queda local al jugador (§9.1.1).
 
@@ -500,7 +525,7 @@ interface BiomeDefinition {
 }
 ```
 
-`Enemy` gana `kind`, `flags?: { typeless?: boolean }`, `lifetimeSec?` y `phaseIndex?`; `definitionId` pasa a ser la especie real. El renderer usa `enemy.definitionId` y se elimina el mapeo por tipo.
+`Enemy` gana `kind`, `flags?: { typeless?: boolean }`, `lifetimeSec?`, `anchoredAtBastion?: boolean`, `bossAttackCooldownSec?: number` y `phaseIndex?`; `definitionId` pasa a ser la especie real. El renderer usa `enemy.definitionId` y se elimina el mapeo por tipo.
 
 #### 9.1.3. Biomas y plantillas iniciales (ids por validar con `sync:pokemon`)
 
@@ -518,27 +543,28 @@ Gran Boss 50: **Gengar** `0094` (Tyranitar `0248` queda como variante cuando exi
 #### 9.1.4. Sprites, assets y licencia
 Ver §7.4. Estrategia de carga: por bioma (precargar las ~8–10 especies del bioma actual y del siguiente), con caché PWA. El tamaño real del presupuesto de assets se fija **tras medirlo** en 3A; no se asume.
 
-#### 9.1.5. Línea base y "Curva v2" de economía
-**Hallazgos verificados** (Anexo A; reproducibles con `docs/analysis/sim-baseline.ts`):
-* **Sin clics, el juego no funciona:** en 20 s hay 0 bajas, 0 oro y el Bastión cae de 100 a 24. Sin bajas no hay oro, y sin oro no se compra nada: es un callejón sin salida en la run inicial, lo cual contradice el pilar *Idle*.
-* **Techo actual ≈ piso 15–25** con un bot de 4 clics/s de puntería perfecta (solo starter, sin gacha ni runas).
-* **La curva no cierra:** el HP enemigo crece ×1,18/piso (el piso 100 pide ~2,5·10⁵ veces el daño del piso 25), el oro crece de forma lineal y las mejoras dan +5…+10% por nivel con costes ×1,22…×1,35. Todo el oro de los pisos 1–100 (~106 000) solo compra ~35 Niveles de Equipo.
+#### 9.1.5. Línea base post-Fase 2 y "Curva v2" de economía
+**Hallazgos verificados en la auditoría post-Fase 2** (Anexo A.2; `docs/analysis/sim-baseline.ts` instrumentado por bajas vs. fugas):
+1. **"Piso alcanzado" medía supervivencia por fugas, no combate:** En `gameLoop.ts`, cualquier enemigo (incluido un jefe) que llega a 24 px del centro se elimina, resta 1 a `waveEnemiesRemaining` y hace un daño de contacto lineal pequeño (`4` en piso 1 → `8` en piso 100). Con 4 clics/s y política "compra barata" (que prioriza Muralla/Fortaleza), el bot llegaba al **piso 103 con 0% de bajas desde el piso 35**, solo Nv. de Equipo 15–17 y habiendo matado únicamente al jefe del piso 10.
+2. **El cronómetro de 30 s de los jefes era inalcanzable (I1):** Los jefes recorren los 168 px hasta el Bastión en 6,7 s (piso 10) a 2,8 s (piso 100) y desaparecen al tocarlo haciendo el mismo daño que un salvaje normal. Además, `bossFloorsClearedBelow(floorReached)` regalaba los Sellos por dejar pasar al jefe (I2).
+3. **El modo Idle sigue sin ser viable (I3):** Sin clics, el bot abate solo el 9–13% de los enemigos en los pisos 1–10 y el 0% en los 11–20; "pasa" el piso 10 únicamente porque el Bastión (130 HP + regen 3%/s) absorbe las fugas.
+4. **Brecha exponencial vs. lineal:** El HP enemigo crece `×1,18/piso` mientras el daño del jugador por nivel crece linealmente (`+10%/nv` y `+8%/nv` en Flechas) con costes exponenciales (`×1,22` y `×1,35`). El techo real donde se mata ≥70% de la oleada está en el **piso ~20–25**.
 
-Esto **no** invalida la Fase 1 (son valores provisionales), pero **bloquea** la Fase 3: ningún jefe de los pisos 50/100 es diseñable sin una economía que llegue. Entregable de 3A:
+**Cambios estructurales obligatorios antes de ajustar números ("Curva v2"):**
+1. **Decisión D1 (Jefes anclados):** Al llegar a `BASTION_DAMAGE_R`, el jefe se ancla en el perímetro y golpea al Bastión cada 1 s por **5–8% del HP máximo del Bastión** hasta morir o agotar el reloj (`30/45/60 s`). `settleRun` solo premia jefes con `bossKilled === true`.
+2. **Decisión D2 (Fugas punitivas):** El daño de contacto de un enemigo normal pasa a incluir una **fracción del HP máximo del Bastión** (ej. `6–8% HP máx.` + base escalada por piso), de modo que dejar pasar una oleada entera sin matar cause derrota incluso comprando `UP_HP`/`UP_WALL`.
+3. **Decisión D3 (Idle viable en piso 1):** Ajustar el DPS base del auto-disparo (subiendo `PROJECTILE_BASE_DAMAGE` o cadencia base inicial vs. `enemyHp(1)`) para que un starter Nv. 1 sin clics limpie ≥80% de las primeras oleadas y genere el oro de rodaje necesario para escalar.
+4. **Familia de curva cerrada (Pisos 1–100):** Alinear la tasa de crecimiento de `enemyHp(floor)` y `enemyGoldValue(floor)` con el escalado multiplicativo por hitos de evolución (Nv. 16, 36, 55) y mejoras, y ampliar el bot de `pnpm run test:balance` para que utilice Definitivas, relevos elementales y equipo de 6.
 
-1. `pnpm run test:balance` (§7.3): ejecuta el núcleo real con bots parametrizados (idle puro, clicker 4/s, "meta máxima") y escribe una tabla piso/tiempo/oro.
-2. Decidir primero la **familia de curva** (la fórmula de HP por piso y el crecimiento de poder del jugador deben crecer a ritmos comparables) y después ajustar costes con el simulador.
-3. Resolver el callejón del inicio (p. ej. daño base de auto-disparo viable en el piso 1 o un pequeño oro de rodaje en los primeros pisos).
+**Hitos objetivo (medidos por *Piso de Combate Efectivo* = último piso con ≥70% de bajas y todos los jefes previos abatidos):**
 
-**Hitos objetivo — propuesta para que el usuario corrija** (el PRD actual no fija duraciones de sesión):
-
-| Perfil | Hito objetivo |
+| Perfil en Simulador (`pnpm run test:balance`) | Hito objetivo (bajas ≥70% + jefes abatidos) |
 | :--- | :--- |
-| Primera run, solo starter, jugador activo | Piso 10–15 en 3–5 min |
-| Primera run, 0 clics | Pasar el primer jefe (piso 10) |
-| ~5 runs, gacha básico y primeras Runas | Piso 20 (Snorlax) |
-| Meta intermedia | Pisos 30–50 |
-| Meta máxima + equipo ★★★ | Piso 100 |
+| Primera run, solo starter (1★), **0 clics (Idle puro)** | Abate al Mini-Boss del **piso 10**; cae en pisos 12–16 |
+| Primera run, solo starter (1★), **1,5 clics/s** | Piso **15–20** (llega a Snorlax en 3–5 min) |
+| Equipo inicial de 3–4 Pokémon (1★–2★), **1,5–2,5 clics/s** | Piso **25–35** (supera Snorlax y entra en Cueva Umbría) |
+| Meta intermedia (equipo de 6 a 2★–3★ + sinergias/relevos) | Piso **50–65** (abate a Gengar en piso 50) |
+| Meta máxima (equipo de 6 a 3★–4★ + relevo táctico + Definitivas) | **Piso 100** (abate a Mewtwo) |
 
 ---
 
@@ -593,7 +619,7 @@ interface DamageContext { attacker; defender; baseDmg; state; rng; modifiers: Mo
 | :--- | :--- | :--- | :--- |
 | EQUIPO | Pasivas de banquillo + Sinergias | **Aditivo** | +100% |
 | CAMPO | Clima, Terreno | **Multiplicativo** por tipo | ×1,3 por fuente (×1,69 máx.) |
-| META | Runas | Aditivo | Según árbol |
+| META | Nodos del Árbol de Runas | Aditivo | Según árbol |
 | EVENTO | Hora Brillante | Aparte, temporal | Duración acotada |
 | MUTADOR | Mutadores de Torre | Multiplicativo (suelen ser negativos) | Sin tope (es dificultad) |
 
@@ -693,13 +719,13 @@ La barra de equipo marca el mejor candidato con una flecha y un multiplicador ("
 | Hada | Relevos curan 5% HP máx. del Bastión | Enfriamiento de relevo −20% |
 
 **Notas de implementación:**
-* Los estados (quemadura, veneno, ralentización, parálisis, congelación) necesitan una infraestructura **genérica** de estados alterados en `Enemy`. La Fase 2 ya la requiere para los 3★ (*Switch-In Bonus*); ver `docs/PHASE2_HANDOFF.md`.
+* Los estados (quemadura, veneno, ralentización, parálisis, congelación) necesitan una infraestructura **genérica** de estados alterados en `Enemy`. La Fase 2 ya la implementó (`StatusInstance`); en 3B se añaden los nuevos tipos de estado (`POISON`, `FREEZE`).
 * No hace falta implementar los 18 tipos de golpe. Se implementan las primitivas y se activan los tipos presentes en el elenco que entregue la Fase 2.
 * **Criterio de calibración:** monotipo-4, bitipo y cobertura-5 deben quedar dentro de ±15% de piso mediano en el simulador con el mismo presupuesto de estrellas.
 
 ---
 
-### 9.5. Jefes Multifase (Fase 3B)
+### 9.5. Jefes Multifase y Anclaje en el Bastión (Fases 3A y 3B)
 
 ```ts
 interface BossPhaseDef {
@@ -709,10 +735,11 @@ interface BossPhaseDef {
 }
 ```
 
-* **Rotación = cambiar `types` del jefe** al cruzar el umbral. No hace falta un "escudo" nuevo: la tabla de tipos ya produce la mecánica *"necesitas relevar"*.
-* **Transición:** al cruzar un umbral, el HP se **recorta al umbral** (una Definitiva o un golpe enorme no pueden saltarse una fase), 1,5 s de invulnerabilidad con el temporizador **en pausa**, banner "¡Gengar cambia a Siniestro/Fantasma!" y cambio de tinte del sprite.
-* **Suelo de inmunidad:** contra jefes (y fugitivos, §9.6) toda inmunidad (`×0`) se convierte en **×0,25** (`BOSS_IMMUNITY_FLOOR`). Sin esto, un equipo sin contratipo puede quedarse a 0 de daño y perder por tiempo sin posibilidad de reacción (soft-lock).
-* **Temporizador:** el actual de 30 s es corto para 4 fases con enfriamiento de relevo de 4 s. **Propuesta:** Mini-Boss 30 s · Gran Boss 50 → 45 s · Gran Boss 100 → 60 s *(ajustable; decisión pendiente, §9.10 P5)*.
+* **Anclaje en el Bastión (Fase 3A, Decisión D1):** Todo jefe (Mini-Boss y Gran Boss) que alcanza `BASTION_DAMAGE_R` (24 px) permanece vivo y anclado en el borde del Bastión, golpeándolo cada `1.0 s` por `5–8%` del HP máximo del Bastión hasta que muera o expire su temporizador.
+* **Rotación = cambiar `types` del jefe** al cruzar el umbral (Fase 3B). No hace falta un "escudo" nuevo: la tabla de tipos ya produce la mecánica *"necesitas relevar"*.
+* **Transición:** al cruzar un umbral, el HP se **recorta al umbral** (una Definitiva o un golpe enorme no pueden saltarse una fase), 1,5 s de invulnerabilidad con el temporizador **en pausa** (y sin golpear al Bastión durante la invulnerabilidad), banner "¡Gengar cambia a Siniestro/Fantasma!" y cambio de tinte del sprite.
+* **Suelo de inmunidad global (`×0,25`):** implementado globalmente en `getEffectiveness` desde 3A.1 (`IMMUNITY_FLOOR = 0.25`, `min(producto de pares no inmunes, 0.25)`). Ningún equipo puede quedarse a 0 de daño contra ningún jefe ni enemigo normal.
+* **Temporizador:** Mini-Boss **30 s** · Gran Boss 50 → **45 s** · Gran Boss 100 → **60 s** (confirmado en P5).
 
 | Jefe | Fases (ejemplo de autoría) |
 | :--- | :--- |
@@ -729,7 +756,7 @@ Regla de autoría: dos fases consecutivas no deben compartir su mejor contratipo
 
 **Requisitos técnicos previos (los tres rompen el diseño si se ignoran):**
 1. **No bloquea el piso.** Hoy la oleada termina cuando `waveEnemiesRemaining <= 0 && aliveEnemies.length === 0`. El fugitivo queda **excluido** de ambas condiciones y persiste hasta el final de su vida útil aunque la oleada ya se haya limpiado.
-2. **Daño sin tipo (`typeless`).** La tabla actual da `Normal ↔ Fantasma = ×0`; un Meowth (Normal) sería inmune a los Fantasma del jugador y el evento sería frustrante. El fugitivo ignora la tabla de tipos y el clima; solo cuentan ATK, nivel y mejoras.
+2. **Daño sin tipo (`typeless`).** Aunque el suelo global sea `×0,25`, hacer un 75% menos de daño a un evento de 7 segundos con un tipo Fantasma o Lucha seguiría siendo frustrante. El fugitivo ignora la tabla de tipos y el clima (`eff = 1.0`); solo cuentan ATK, nivel y mejoras.
 3. **No es objetivo del auto-disparo** mientras haya otros enemigos (el auto-disparo apunta al más cercano al centro; el fugitivo pasa lejos). Sí recibe AoE, rebotes, Definitiva y clics: así el clic es su vía principal y un jugador idle puede cazarlo por casualidad con AoE.
 
 **Reglas:**
@@ -779,13 +806,13 @@ Por cada Pokémon Shiny **en el equipo de 6** (hasta 3): **+50% de probabilidad 
 * Tirada por enemigo salvaje normal (canal `SPECIAL`): base `SHINY_WILD_RATE = 1/1000` *(ajustable; con ~250 enemigos por run corta y ~1000 en la campaña completa, apunta a 1 cada 3–5 runs de longitud media)*, × Resonancia × bonus de Explorador. **Máximo uno por run. Nunca en pisos de jefe.**
 * **Aspecto y comportamiento:** destello y sonido al aparecer, banner "¡Un Pokémon Shiny salvaje!". Avanza como un enemigo normal (HP ×3), de modo que un jugador idle puede abatirlo con la defensa; si llega al Bastión, **se escapa sin dañarlo** (solo se pierde la oportunidad).
 * **Recompensa al abatirlo:**
-  1. **Sellos de Reclutamiento** *(cantidad ≈ 3 tiradas; fijar tras definir el coste de tirada en la Fase 2)*, tal como ya recoge §3.1.
+  1. **Sellos de Reclutamiento** (`3` Sellos, equivalentes a 3 tiradas con `GACHA_PULL_COST = 1`), tal como ya recoge §3.1.
   2. **Hora Brillante:** 12 s con **crítico garantizado, oro ×2 y carga de Definitiva ×2** (+Resonancia). Es un "jackpot" breve y legible, distinto en carácter al fugitivo (que premia puntería).
   3. *(Opcional, 3C-b)* **Captura:** 35% de convertir en Shiny esa especie **solo si ya la posees** y no es Shiny; si no, no pasa nada extra. Se marca opcional por ser lo de peor valor/coste: depende del solapamiento entre el elenco salvaje y el de tu Caja, y no puede dar Pokémon nuevos (sería un atajo al gacha).
 
 #### Riesgos técnicos
 * **Sprites Shiny:** SpriteCollab admite recolores Shiny, pero la estructura exacta de carpetas debe **verificarse en un spike** al construir `sync:pokemon`. Plan B: recolor por canal de tono en Canvas más destello.
-* **Persistencia:** `shinyOwned/shinyActive` debe estar en el esquema de guardado de la Fase 2 (ver `docs/PHASE2_HANDOFF.md`); añadirlo después exige migración.
+* **Persistencia:** `shinyOwned/shinyActive` ya está incorporado en `META_VERSION = 2` desde la Fase 2.
 
 ---
 
@@ -806,74 +833,107 @@ El PRD lo describe en una línea. Para que no sea un trampolín a la oscilación
 
 * **Desbloqueo:** primera victoria sobre el piso 100 de Campaña. En la Torre la run **no se detiene** en el piso 100 (pregunta P2, §9.10).
 * **Jefes:** Mini-Boss cada 10 pisos; Gran Boss **cada 50** (50, 100, 150, 200…). El código actual fija `BIG_BOSS_FLOORS = [50, 100]`; pasará a `floor % 50 === 0`.
-* **Mutadores:** conjunto activo que **se sustituye** cada década (pisos 101, 111, 121…) y crece en número: 1 mutador (101–150), 2 (151–250), 3 (251+). Se eligen con el canal `SPECIAL` sin repetir ni combinar incompatibles (Inmunidad + Inversión).
+* **Mutadores:** conjunto activo que **se sustituye** cada década (pisos 101, 111, 121…) y crece en número: 1 mutador (101–150), 2 (151–250), 3 (251+). Se eligen con el canal `SPECIAL` sin repetir ni combinar incompatibles (Resistencia Extrema + Inversión).
 
 | Mutador | Efecto |
 | :--- | :--- |
-| Inmunidad Elemental | Los enemigos son inmunes a un tipo anunciado (los jefes aplican el suelo ×0,25) |
-| Inversión de Tipos | ×1,5 ↔ ×0,65 (las inmunidades no cambian). Máx. uno cada 50 pisos |
-| Suelo Volcánico | El Bastión pierde 1% de HP máx./s mientras el activo no sea Agua, Tierra o Roca |
-| Horda | +50% enemigos, −35% de HP cada uno |
-| Coraza | Enemigos con HP ×1,4 y oro ×1,4 |
-| Veloces | Enemigos con +30% de velocidad |
+| **Resistencia Extrema** *(antes Inmunidad Elemental)* | El daño del tipo anunciado se multiplica por **`×0,10`** (penalización severa que obliga a relevar pero sin anular a `0` ni romper la regla de no soft-lock). |
+| Inversión de Tipos | `×1,5` ↔ `×0,65` (el suelo de inmunidad `×0,25` no se invierte). Máx. uno cada 50 pisos. |
+| Suelo Volcánico | El Bastión pierde 1% de HP máx./s mientras el activo no sea Agua, Tierra o Roca. |
+| Horda | +50% enemigos, −35% de HP cada uno. |
+| Coraza | Enemigos con HP ×1,4 y oro ×1,4. |
+| Veloces | Enemigos con +30% de velocidad. |
 
 * **Corrección sobre el PRD v2.2:** la "Muerte Súbita" no diferencia la Torre de la Campaña (la derrota ya termina la run en todos los modos, §4.2). Lo que sí la diferencia es el **registro de récord**, los **mutadores/terrenos** y los **Gran Boss cada 50**.
 * Terrenos (§9.3.3) también rotan por década en la Torre.
 
 ---
 
-### 9.10. Riesgos y Preguntas Abiertas
+### 9.10. Riesgos y Decisiones de Diseño Confirmadas
 
 **Riesgos**
 
 | Riesgo | Impacto | Mitigación |
 | :--- | :--- | :--- |
-| Rebalanceo de economía mayor de lo previsto | Retrasa 3A | Simulador primero; decidir la familia de curva antes de ajustar costes |
+| Rebalanceo de economía mayor de lo previsto | Retrasa 3A | Anclar jefes (D1) y penalizar fugas (D2) primero; medir por bajas reales en el simulador antes de ajustar números |
 | Suma de modificadores desbordada | Rompe balance y validación | Pipeline con topes por categoría (§9.3.1) |
 | Sinergias monotipo dominantes | Contradice el pilar "equipo de 6 equilibrado" | Sinergia de Cobertura + criterio ±15% (§9.4) |
 | Sprites Shiny no disponibles tal cual | Recorta la capa visual | Spike en 3A; plan B por recolor |
 | Carga de assets al crecer el elenco | Tiempo de carga / PWA | Sprites locales y carga por bioma (§7.4) |
 | Licencia CC BY-NC del arte comunitario | Limita monetización futura | Proyecto no comercial; créditos visibles (§7.4) |
 
-**Preguntas para el usuario** (cada una tiene una suposición por defecto, ya aplicada arriba)
+**Decisiones de diseño confirmadas (v2.3 y v2.4)**
 
-| # | Pregunta | Suposición aplicada |
+| # | Pregunta / Decisión | Resolución confirmada |
 | :--- | :--- | :--- |
-| P1 | ¿Confirmas desacoplar el Shiny de la 5★ (la 5★ pasa a *Aura Apex*)? Toca texto de §1, §3.1 y Fase 2 | Sí |
-| P2 | ¿La Torre es "la run continúa más allá del 100" (desde el piso 1) o se puede empezar en un piso alto? Un ranking exige punto de partida común | Continúa desde el 1 |
-| P3 | ¿Las Runas dan +4% de daño **pasivo y además** se gastan en el árbol, o solo se gastan? Con la fórmula actual el piso 100 da 89 Runas (+356% si es pasivo) | No fijado; decidir antes de 3A |
-| P4 | ¿Qué duración de sesión y progresión quieres? (tabla de §9.1.5) | Propuesta de §9.1.5 |
-| P5 | ¿Temporizadores de Gran Boss de 45 s (piso 50) y 60 s (piso 100)? | Sí |
-| P6 | ¿"Idle" significa que una run sin clics debe ser viable, o que los clics son un bonus activo? Hoy sin clics no se avanza | Viable pero lenta |
-| P7 | ¿El proyecto es y seguirá siendo no comercial? (arte comunitario CC BY-NC) | Sí |
+| **P1** | ¿Desacoplar el Shiny de la 5★ (la 5★ pasa a *Aura Apex*)? | **Confirmado (Sí)** — Implementado en Fase 2. |
+| **P2** | ¿La Torre continúa desde el piso 1 más allá del 100? | **Confirmado (Sí)** — Continúa desde el piso 1. |
+| **P3** | ¿Cómo funcionan las Runas Ancestrales entre el bono pasivo y el Árbol? | **Confirmado (Moneda del Árbol)** — Las Runas se gastan como moneda en el Árbol de Habilidades; los bonos provienen de los nodos comprados (evitando +356% pasivo gratis en piso 100). |
+| **P4** | ¿Qué progresión e hitos por perfil buscamos? | **Confirmado** — Tabla de §9.1.5 medida por bajas reales (≥70%) y jefes abatidos. |
+| **P5** | ¿Temporizadores de Gran Boss de 45 s (piso 50) y 60 s (piso 100)? | **Confirmado (Sí)** — 30 s Mini-Boss, 45 s Piso 50, 60 s Piso 100. |
+| **P6 / D3** | ¿"Idle" significa que una run sin clics debe limpiar el inicio? | **Confirmado (Sí)** — El auto-disparo inicial limpia ≥80% del piso 1 y abate al primer jefe (piso 10). |
+| **P7** | ¿El proyecto es y seguirá siendo no comercial? | **Confirmado (Sí)** — CC BY-NC 4.0 con pantalla de Créditos. |
+| **D1** | ¿Cómo se comporta un jefe al llegar al radio del Bastión? | **Confirmado (Anclaje)** — Se ancla en `BASTION_DAMAGE_R` y golpea cada 1 s (`5–8%` HP máx.) hasta morir o agotar su reloj; los Sellos exigen abatirlo. |
+| **D2** | ¿Cómo evitamos que "tanquear fugas" sea óptimo frente a hacer daño? | **Confirmado** — El daño de contacto escala como fracción del HP máx. del Bastión + piso. |
+| **D4** | ¿Cómo se integra el Autoclick ergonómico? | **Confirmado** — Desbloqueo base permanente/simbólico + cadencia comprable con oro en la run (`UP_AUTOCLICK` 1→4/s), cursor en escritorio y modo "fijar punto" en táctil, tras calibrar la Curva v2. |
+| **D5** | ¿Inmunidad elemental `×0,25` global y qué pasa con el mutador de la Torre? | **Confirmado** — Suelo global `×0,25` siempre (`min(producto del resto, 0.25)`), y el mutador de la Torre pasa a *Resistencia Extrema* (`×0,10`). |
 
 ---
 
-## Anexo A. Estado Verificado del Proyecto (commit `9eafe53`, Fase 1)
+## Anexo A. Estado Verificado del Proyecto (Fases 1 y 2)
 
-Auditoría hecha leyendo el código y **ejecutando el núcleo real** con `docs/analysis/sim-baseline.ts` (`npx tsx docs/analysis/sim-baseline.ts`). Leyenda: **E** = ejecutado · **C** = leído en código.
+### A.1. Auditoría inicial (commit `9eafe53`, cierre de Fase 1)
+Auditoría hecha leyendo el código y ejecutando el núcleo real con `docs/analysis/sim-baseline.ts`. Leyenda: **E** = ejecutado · **C** = leído en código.
 
-| # | Hallazgo | Evidencia | Impacto en el plan |
+| # | Hallazgo original (Fase 1) | Estado tras Fase 2 (`d800ce9`) | Impacto en Fase 3 |
 | :--- | :--- | :--- | :--- |
-| A1 | **El juego no es idle en la run inicial.** 20 s sin clics: 0 bajas, 0 oro, Bastión 100→24 (E) | `sim-baseline.ts` §1; auto-disparo ≈ 1,75 de daño/s frente a 20 de HP por enemigo | §9.1.5, P6 |
-| A2 | **Techo ≈ piso 15–25** con bot de 4 clics/s de puntería perfecta, solo starter (E) | Pisos 25/22/24 (política "barato primero") y 19/15/17 ("ofensivo") | 3A bloquea a 3B+ |
-| A3 | **La curva de HP no cierra con la del jugador**: HP(piso 100)/HP(piso 25) = 2,46·10⁵; todo el oro de los pisos 1–100 (~106 000) solo compra ≈ Nv. 35 (E) | `sim-baseline.ts` §3 | §9.1.5 "Curva v2" |
-| A4 | **RNG único y semilla fija = 1**: críticos, disparos y oleadas comparten flujo (`gameLoop.ts: stepOnce`, `App.tsx: mulberry32(GAME_CONFIG.seed)`) (C) | Dos jugadores con la misma semilla verían oleadas distintas | §9.1.1; requisito del Desafío Diario |
-| A5 | **Los enemigos no tienen especie**: `definitionId` es `'WILD'`/`'BOSS'`, tipos al azar entre 18; el renderer elige sprite por tipo (`sprites.ts: WILD_BY_TYPE`) (C) | Imposibles biomas, Shiny salvajes y fugitivos sin esto | §9.1.2 |
-| A6 | **La oleada exige `aliveEnemies.length === 0`** para avanzar (`gameLoop.ts`, paso 6) (C) | Cualquier enemigo extra (fugitivo) bloquearía el piso | §9.6 req. 1 |
-| A7 | **Inmunidades pueden dejar el daño en 0** (`GHOST→NORMAL = 0`, etc.); un equipo sin contratipo ante un jefe pierde por tiempo (C) | Soft-lock posible | §9.5 suelo ×0,25 |
-| A8 | **Sprites por *hotlink*** a `raw.githubusercontent.com` (`sprites.ts`, `pokeAssets.ts`); `sync:pokemon` no existe (C) | Sin offline/PWA, riesgo de límites y de caída; sin créditos | §7.4 |
-| A9 | `howler` e `idb-keyval` son dependencias **sin ningún uso** (C) | La persistencia llega con la Fase 2; el audio no tiene dueño | 3C (audio) |
-| A10 | Clic solo con `mousedown` (`App.tsx`) (C) | Toques rápidos en móvil/PWA poco fiables; el fugitivo se juega a toques | 3A |
-| A11 | **Deriva PRD ↔ código:** arena 384 px (el PRD decía 144); `BIG_BOSS_FLOORS = [50, 100]` (el PRD pide cada 50 en Infinito); "Muerte Súbita" no diferencia la Torre (la derrota ya termina la run) (C) | Corregido en v2.3 | §3.3, §5.3, §9.9 |
-| A12 | Pools de jefes del PRD incluyen Gen 2/3 (Tyranitar, Metagross, Rayquaza) y el elenco jugable es Gen 1 (C) | El enemigo necesita su propia plantilla ligera | §9.1.2 |
-| A13 | `ARENA.SPAWN_MARGIN` no se usa: los enemigos nacen exactamente sobre el borde (radio 192) en lugar de 16 px fuera (C) | Aparición "a saltos"; irrelevante para balance | menor, 3A |
+| A1 | **El juego no es idle en la run inicial.** | Parcialmente enmascarado por HP/regen del Bastión (ver A.2): solo mata 9–13% en pisos 1–10 sin clics. | Bloque 3A.2 (D3) |
+| A2 | **Techo real ≈ piso 15–25** matando enemigos. | Se mantiene: a partir del piso ~20–30 el bot mata <5% de los enemigos. | Bloque 3A.2 ("Curva v2") |
+| A3 | **La curva de HP no cierra con la del jugador** (`×1,18/piso` vs lineal). | Vigente. | Bloque 3A.2 ("Curva v2") |
+| A4 | **RNG único y semilla fija = 1**. | Vigente. | Bloque 3A.4 (§9.1.1) |
+| A5 | **Los enemigos no tienen especie** (`'WILD'`/`'BOSS'`). | Vigente. | Bloque 3A.4 (§9.1.2) |
+| A6 | **La oleada exige `aliveEnemies.length === 0`**. | Vigente. | Fase 3C (§9.6 req. 1) |
+| A7 | **Inmunidades dejan el daño en 0** (52% del roster afectado). | Vigente en código (`SPARSE_CHART` con `0`). | Bloque 3A.1 (suelo global `×0,25`) |
+| A8 | **Sprites por *hotlink*** a `raw.githubusercontent.com`. | Vigente. | Bloque 3A.4 (`sync:pokemon`) |
+| A9 | `howler` e `idb-keyval` sin uso. | **`idb-keyval` resuelto en Fase 2** (`src/storage/saveGame.ts`); queda `howler`. | Fase 3C (audio) |
+| A10 | Clic solo con `mousedown`. | **Resuelto en Fase 2** (`pointerdown` + hold-to-fire 250 ms); falta `pointermove`. | Bloque 3A.3 |
+| A11 | **Deriva PRD ↔ código** (arena 384 px, etc.). | Corregido en v2.3/v2.4. | — |
+| A12 | Pools de jefes incluyen Gen 2/3. | Vigente. | Bloque 3A.4 (`EnemyDefinition`) |
+| A13 | `ARENA.SPAWN_MARGIN` no se usa. | Vigente. | Bloque 3A.4 |
 
-**No verificado (límites de esta auditoría):** no instalé dependencias, así que **no ejecuté** `vitest` ni `vite build` (entorno sin red); no vi el código de la Fase 2; la política de compra del bot es ingenua (una política óptima subiría el techo algo, pero no cinco órdenes de magnitud); el bot no usa Definitiva ni relevos porque en la Fase 1 el equipo solo tiene el starter.
+### A.2. Auditoría Post-Fase 2 y Análisis del Simulador (commit `d800ce9`, 16-oct-2026)
+
+1. **Verificación de Fase 2:** Completada al 100% en contratos de datos y funcionalidad (Santuario Gacha 60/30/8/2 con pity 30/80, Caja de 6 con bloqueo de línea evolutiva repetida, Estrellas 1★–5★ con pasivas/Switch-In/patrón/Aura Apex, Definitiva por especie 30/26/22 s, estados alterados `StatusInstance` y persistencia versionada `META_VERSION = 2`).
+2. **Separación de Bajas vs. Fugas en el Simulador (semillas 1–2):**
+   | Perfil | Piso final reportado | % bajas p1–10 | p11–20 | p21–50 | p51+ | 1.er piso con <3 bajas | Jefes abatidos |
+   | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+   | Idle, compra barata | 16–17 | 9–13% | 0% | — | — | **1–2** | ninguno (pasa p10 por fuga) |
+   | 1,5 cps, compra barata | 57–67 | 96–98% | 55–70% | 1–5% | 0% | 18–24 | 0–1 (solo piso 10) |
+   | 1,5 cps, ofensivo | 38 | 85–89% | 26–31% | 0–1% | — | 11–13 | ninguno |
+   | 4 cps, compra barata | 88–103 | 100% | 99% | 18–30% | 0% | 26–32 | solo piso 10 |
+   | 4 cps, ofensivo | 47 | 100% | 75–78% | 4–6% | — | 22–24 | solo piso 10 |
+   *Conclusión clave:* El jefe recorre los 168 px hasta el Bastión en 2,8–6,7 s y se elimina al tocarlo haciendo 4,4–8,0 de daño, por lo que `bossTimerExpired` (30 s) era inalcanzable y la política "barata" ganaba comprando HP para tanquear fugas. Se resuelve en el Bloque 3A.2 (D1–D3).
+3. **Medición de Layout Responsive a 1080p:**
+   * En `1920×969` (1080p con barra de navegador), el panel derecho de `26rem` (`416 px`) deja solo `286 px` de alto al panel de Mejoras (6 de 9 visibles con scroll) mientras desperdicia `~600 px` horizontales. En portátiles `1366×650` o `1536×730`, la rejilla de mejoras colapsa a `8–47 px` (inutilizable). Se resuelve en el Bloque 3A.1 (§3.3).
 
 ---
 
-## Anexo B. Cambios de la v2.2 a la v2.3
+## Anexo B. Historial de Cambios del PRD
+
+### De la v2.3 a la v2.4 (16-oct-2026)
+
+| Sección | Cambio |
+| :--- | :--- |
+| Cabecera, §8, Anexo A.2 | **Fase 2 marcada como completada** (`d800ce9`). Añadida auditoría post-Fase 2 del simulador (bajas vs. fugas) y de layout 1080p. |
+| §3.1, §5.1, §9.5 | **Anclaje de Jefes (D1) y Sellos por baja real (I1, I2):** los jefes no se autodestruyen al tocar el Bastión; se anclan en el radio y golpean cada 1 s (`5–8%` HP máx.) hasta morir o agotar el reloj. Los Sellos de primera victoria exigen `bossKilled`. |
+| §3.2, §9.5, §9.6, §9.9 | **Suelo de inmunidad global `×0,25` (D5, I6):** `getEffectiveness` aplica `min(producto de pares no inmunes, 0.25)` globalmente. El mutador de la Torre se redefine como *Resistencia Extrema* (`×0,10`). |
+| §3.2, §4.1, §6.3, §8 | **Autoclick ergonómico (`UP_AUTOCLICK`, D4):** desbloqueo base permanente/simbólico + cadencia mejorable con oro en la run (1→4/s), disparo en cursor (escritorio) y modo "fijar punto" (táctil), seguimiento `pointermove` y separación `manual_clicks` / `auto_clicks` en `RunProof`. |
+| §3.3, §8 | **Responsive 1080p:** red de seguridad con `h-dvh` y `min-height` en Mejoras, layout de 2 columnas en viewports panorámicos bajos (`min-aspect-ratio: 16/10`, `max-height: 1000px`) y tarjetas de Equipo compactas en `≤800px`. |
+| §4.1 | **Sincronización PRD ↔ código (I4, I7) y fugas (D2):** nombres reales de mejoras (`Daño de clic`, `Muralla`, `Flechas`, `Codicia`, `Fortaleza`/`UP_WALL`), regeneración `3%/s` y daño de contacto por fracción del HP máx. del Bastión. |
+| §4.3, §9.3.1, §9.10 | **Resolución P3 (Runas):** las Runas son moneda que se gasta en el Árbol de Habilidades, sin bono pasivo gratuito por acumulación bruta. |
+| §8, §9.1.5 | **Reestructuración de Fase 3A en 4 bloques (3A.1–3A.4)** y nuevos criterios de aceptación basados en tasa de bajas (`≥70%`) y jefes abatidos. |
+
+### De la v2.2 a la v2.3
 
 | Sección | Cambio |
 | :--- | :--- |
@@ -885,3 +945,4 @@ Auditoría hecha leyendo el código y **ejecutando el núcleo real** con `docs/a
 | §8 | **Fase 3 dividida en 3A–3D**; Fase 4 con requisitos heredados; **Fase 5** (backlog y descartes). |
 | §9 *(nueva)* | Diseño detallado de las Fases 3+. |
 | Anexo A *(nuevo)* | Estado verificado del proyecto. |
+

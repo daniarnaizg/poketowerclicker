@@ -43,7 +43,7 @@ export function GameHUD({ gameState, onUltimate, onToggleAutoAdvance, onStartNex
   const ultRemainingSec = Math.ceil(gameState.ultimateMax - gameState.ultimateCharge);
 
   return (
-    <div class="pk-window flex shrink-0 flex-col gap-2.5 p-3">
+    <div class="game-hud pk-window flex shrink-0 flex-col gap-2.5 p-3">
       <div class="flex items-center justify-between gap-2 text-[10px]">
         <span class="pk-dark px-2 py-2">PISO {gameState.floor}</span>
         <span class="pk-dark px-2 py-2">SALVAJES {gameState.waveEnemiesRemaining}</span>

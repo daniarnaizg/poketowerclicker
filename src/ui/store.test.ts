@@ -67,6 +67,11 @@ describe('useGameStore', () => {
       setAutoAdvance: false,
     });
     expect(useGameStore.getState().consumeInput()).toEqual({});
+
+    s.requestClickAttack(15, 25, true);
+    expect(useGameStore.getState().consumeInput()).toEqual({
+      click: { x: 15, y: 25, isAuto: true },
+    });
   });
 
   it('pushes on phase change and throttles same-phase frames', () => {

@@ -6,6 +6,8 @@
 
 import { ARENA } from '../config/arena.config';
 import type {
+  BiomeDefinition,
+  BiomeId,
   Enemy,
   Entity,
   FloatingText,
@@ -19,6 +21,7 @@ import { MAX_STARS } from '../config/balance.config';
 import { typeColor, typeLetters } from './typeColors';
 import { dirRow, drawSprite, getSprite, speciesForEnemy } from './sprites';
 import type { AnimName } from './sprites';
+import { biomeAt, buildBackdrop } from '../data/biomes';
 import './arena.css';
 
 const FULL_CIRCLE = Math.PI * 2;
@@ -29,7 +32,6 @@ const HP_BAR_GAP = 6;
 const PIXEL_FONT = "'Press Start 2P', monospace";
 const TYPE_FONT = `7px ${PIXEL_FONT}`;
 const TEXT_FONT = `10px ${PIXEL_FONT}`;
-const TILE = 32;
 const INK = '#303030';
 
 /** Oscurece un #rrggbb para el sombreado pixel-art de cada sprite. */
@@ -78,26 +80,30 @@ function enemyRadius(enemy: Enemy): number {
   return enemy.isBoss ? ARENA.BOSS_HITBOX_R : ARENA.ENEMY_HITBOX_R;
 }
 
-export function renderBackground(ctx: CanvasRenderingContext2D): void {
-  // Césped en damero de 32px, como una ruta de los juegos clásicos.
-  for (let ty = 0; ty < ARENA.SIZE / TILE; ty++) {
-    for (let tx = 0; tx < ARENA.SIZE / TILE; tx++) {
-      ctx.fillStyle = (tx + ty) % 2 === 0 ? '#78c850' : '#68b840';
-      ctx.fillRect(tx * TILE, ty * TILE, TILE, TILE);
-    }
-  }
+const backdropCache = new Map<BiomeId, HTMLCanvasElement>();
 
-  // Plataforma del Bastión: círculo claro con borde discontinuo.
-  const r = ARENA.PLAYER_HITBOX_R * 2;
-  ctx.fillStyle = 'rgba(255,255,255,0.25)';
-  ctx.beginPath();
-  ctx.arc(ARENA.CENTER, ARENA.CENTER, r, 0, FULL_CIRCLE);
-  ctx.fill();
-  ctx.setLineDash([6, 6]);
-  ctx.lineWidth = 2;
-  ctx.strokeStyle = 'rgba(255,255,255,0.7)';
-  ctx.stroke();
-  ctx.setLineDash([]);
+/** Returns cached pre-rendered backdrop canvas for the given biome. */
+export function getBackdrop(biome: BiomeDefinition): HTMLCanvasElement {
+  let canvas = backdropCache.get(biome.id);
+  if (!canvas) {
+    canvas = buildBackdrop(biome);
+    backdropCache.set(biome.id, canvas);
+  }
+  return canvas;
+}
+
+export function clearBackdropCache(): void {
+  backdropCache.clear();
+}
+
+export function renderBackground(
+  ctx: CanvasRenderingContext2D,
+  biome: BiomeDefinition = biomeAt(1),
+): void {
+  const canvas = getBackdrop(biome);
+  if (canvas && typeof (canvas as any).getContext === 'function') {
+    ctx.drawImage(canvas, 0, 0);
+  }
 }
 
 /** Sombra elíptica bajo el sprite, teñida con el color del tipo primario. */
@@ -366,7 +372,8 @@ export class ArenaRenderer {
     }
     const anim: AnimName = now - this.lastFireMs < 350 ? 'attack' : 'idle';
 
-    renderBackground(ctx);
+    const biome = biomeAt(state.floor);
+    renderBackground(ctx, biome);
     if ((state.bastionShieldSec ?? 0) > 0) drawShield(ctx, state.bastionShieldSec ?? 0, now);
     renderEnemies(ctx, state.enemies, now);
     renderProjectiles(ctx, state.projectiles);
