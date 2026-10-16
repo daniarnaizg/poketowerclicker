@@ -13,7 +13,9 @@ import type {
   PlayerPokemon,
   PokemonType,
   Projectile,
+  VisualEffect,
 } from '../core/types';
+import { MAX_STARS } from '../config/balance.config';
 import { typeColor, typeLetters } from './typeColors';
 import { dirRow, drawSprite, getSprite, speciesForEnemy } from './sprites';
 import type { AnimName } from './sprites';
@@ -118,6 +120,8 @@ export function renderPokemon(
 ): void {
   const r = ARENA.PLAYER_HITBOX_R;
   const set = getSprite(pokemon.definitionId);
+  // 5★ "Aspecto Shiny": golden aura + sparkles behind the sprite.
+  if ((pokemon.stars ?? 1) >= MAX_STARS) drawShinyAura(ctx, x, y, r, opts.now ?? performance.now());
   if (!set) {
     drawEntityCircle(ctx, x, y, r, typeColor(pokemon.types[0]));
     drawTypeLabel(ctx, pokemon.types, x, y);
@@ -125,6 +129,103 @@ export function renderPokemon(
   }
   drawShadow(ctx, x, y + r * 1.2, r, typeColor(pokemon.types[0]));
   drawSprite(ctx, set, opts.anim ?? 'idle', dirRow(opts.dx ?? 0, opts.dy ?? 1), opts.now ?? performance.now(), x, y, r * 4);
+}
+
+/** Pulsing golden glow with four orbiting sparkles (5★ / Shiny). */
+function drawShinyAura(ctx: CanvasRenderingContext2D, x: number, y: number, r: number, now: number): void {
+  const pulse = 0.75 + 0.25 * Math.sin(now / 260);
+  const g = ctx.createRadialGradient(x, y, r * 0.3, x, y, r * 2.4);
+  g.addColorStop(0, `rgba(255,224,96,${0.55 * pulse})`);
+  g.addColorStop(1, 'rgba(255,224,96,0)');
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  ctx.arc(x, y, r * 2.4, 0, FULL_CIRCLE);
+  ctx.fill();
+  for (let i = 0; i < 4; i++) {
+    const a = now / 700 + (i * Math.PI) / 2;
+    const sx = Math.round(x + Math.cos(a) * r * 1.9);
+    const sy = Math.round(y + Math.sin(a) * r * 1.5);
+    ctx.fillStyle = '#fff6c0';
+    ctx.fillRect(sx - 1, sy - 3, 2, 6);
+    ctx.fillRect(sx - 3, sy - 1, 6, 2);
+  }
+}
+
+/** Translucent dome around the bastion while the 3★ Switch-In shield is up. */
+function drawShield(ctx: CanvasRenderingContext2D, secLeft: number, now: number): void {
+  const r = ARENA.BASTION_DAMAGE_R + 18;
+  const blink = secLeft < 1 ? 0.5 + 0.5 * Math.sin(now / 60) : 1; // flickers before expiring
+  ctx.globalAlpha = 0.28 * blink;
+  ctx.fillStyle = '#58b0f8';
+  ctx.beginPath();
+  ctx.arc(ARENA.CENTER, ARENA.CENTER, r, 0, FULL_CIRCLE);
+  ctx.fill();
+  ctx.globalAlpha = 0.9 * blink;
+  ctx.lineWidth = 3;
+  ctx.strokeStyle = '#d8f0ff';
+  ctx.stroke();
+  ctx.globalAlpha = 1;
+}
+
+const STATUS_PIP: { key: 'burnSec' | 'slowSec' | 'paralyzeSec'; color: string }[] = [
+  { key: 'burnSec', color: '#f08030' },
+  { key: 'slowSec', color: '#58b0f8' },
+  { key: 'paralyzeSec', color: '#f8d030' },
+];
+
+/** Small colored squares over an enemy for each active ailment. */
+function drawStatusPips(ctx: CanvasRenderingContext2D, enemy: Enemy, y: number): void {
+  const st = enemy.status;
+  if (!st) return;
+  const active = STATUS_PIP.filter((p) => (st[p.key] ?? 0) > 0);
+  active.forEach((p, i) => {
+    const px = Math.round(enemy.x - (active.length * 8) / 2 + i * 8);
+    ctx.fillStyle = INK;
+    ctx.fillRect(px - 1, y - 1, 8, 8);
+    ctx.fillStyle = p.color;
+    ctx.fillRect(px, y, 6, 6);
+  });
+}
+
+/** Ultimate beams / novas / flashes and switch-in rings; fades out with age. */
+export function renderEffects(ctx: CanvasRenderingContext2D, effects: readonly VisualEffect[]): void {
+  for (const fx of effects) {
+    const t = fx.maxAge > 0 ? Math.min(1, fx.age / fx.maxAge) : 1;
+    const fade = 1 - t;
+    const color = typeColor(fx.type);
+    ctx.save();
+    if (fx.kind === 'BEAM' && fx.x2 !== undefined && fx.y2 !== undefined) {
+      ctx.lineCap = 'round';
+      ctx.globalAlpha = 0.85 * fade;
+      ctx.strokeStyle = color;
+      ctx.lineWidth = (fx.width ?? 30) * (1 - t * 0.4);
+      ctx.beginPath();
+      ctx.moveTo(fx.x, fx.y);
+      ctx.lineTo(fx.x2, fx.y2);
+      ctx.stroke();
+      ctx.globalAlpha = fade;
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = (fx.width ?? 30) * 0.35;
+      ctx.stroke();
+    } else if (fx.kind === 'FLASH') {
+      ctx.globalAlpha = 0.45 * fade;
+      ctx.fillStyle = color;
+      ctx.fillRect(0, 0, ARENA.SIZE, ARENA.SIZE);
+    } else {
+      // NOVA / RING: expanding circle.
+      const radius = (fx.radius ?? 60) * (1 - (1 - t) * (1 - t));
+      ctx.globalAlpha = (fx.kind === 'NOVA' ? 0.25 : 0.12) * fade;
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.arc(fx.x, fx.y, radius, 0, FULL_CIRCLE);
+      ctx.fill();
+      ctx.globalAlpha = 0.95 * fade;
+      ctx.lineWidth = 2 + 4 * fade;
+      ctx.strokeStyle = color;
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
 }
 
 export function renderEnemies(
@@ -146,6 +247,7 @@ export function renderEnemies(
       drawTypeLabel(ctx, enemy.types, enemy.x, enemy.y);
     }
     if (enemy.isBoss) drawCrown(ctx, enemy.x, enemy.y - r * 2 + 2);
+    drawStatusPips(ctx, enemy, enemy.y - r * 2 - HP_BAR_GAP - 11);
   }
 }
 
@@ -266,9 +368,11 @@ export class ArenaRenderer {
     const anim: AnimName = now - this.lastFireMs < 350 ? 'attack' : 'idle';
 
     renderBackground(ctx);
+    if ((state.bastionShieldSec ?? 0) > 0) drawShield(ctx, state.bastionShieldSec ?? 0, now);
     renderEnemies(ctx, state.enemies, now);
     renderProjectiles(ctx, state.projectiles);
     if (active) renderPokemon(ctx, active, C, C, { now, dx, dy, anim });
+    renderEffects(ctx, state.effects ?? []);
     renderFloatingText(ctx, state.floatingTexts);
 
     for (const enemy of state.enemies) {

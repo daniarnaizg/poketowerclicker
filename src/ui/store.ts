@@ -10,7 +10,7 @@
  */
 
 import { create } from 'zustand';
-import type { BastionUpgradeId, GameInput, GamePhase, GameState } from '../core/types';
+import type { BastionUpgradeId, GameInput, GamePhase, GameState, LoadoutEntry } from '../core/types';
 
 /** HUD refresh cadence in ms when the phase is unchanged. */
 const HUD_INTERVAL_MS = 100;
@@ -33,8 +33,11 @@ interface GameStore {
   requestClickAttack: (x: number, y: number) => void;
   purchaseUpgrade: (upgradeId: BastionUpgradeId) => void;
   requestTeamLevelUp: () => void;
+  /** Start a run from the 6-slot loadout chosen in the Caja (MENU phase). */
+  requestStartRun: (loadout: (LoadoutEntry | null)[]) => void;
   consumeInput: () => GameInput;
-  startNewGame: () => void;
+  /** Reset UI state; `phase` is where the player lands (MENU once a starter exists). */
+  startNewGame: (phase?: GamePhase) => void;
 }
 
 export const useGameStore = create<GameStore>((set, get) => {
@@ -66,6 +69,7 @@ export const useGameStore = create<GameStore>((set, get) => {
     requestClickAttack: (x, y) => queue({ click: { x, y } }),
     purchaseUpgrade: (upgradeId) => queue({ buyUpgrade: upgradeId }),
     requestTeamLevelUp: () => queue({ buyTeamLevel: true }),
+    requestStartRun: (loadout) => queue({ startRun: loadout }),
 
     consumeInput: () => {
       const input = get().pendingInput;
@@ -73,10 +77,10 @@ export const useGameStore = create<GameStore>((set, get) => {
       return input;
     },
 
-    startNewGame: () => {
+    startNewGame: (phase = 'STARTER_SELECT') => {
       lastHudPush = 0;
       lastPushedPhase = null;
-      set({ gameState: null, phase: 'STARTER_SELECT', hudVersion: 0, pendingInput: {} });
+      set({ gameState: null, phase, hudVersion: 0, pendingInput: {} });
     },
   };
 });

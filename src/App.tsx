@@ -8,6 +8,9 @@ import { useEffect, useRef } from 'preact/hooks';
 import { ArenaRenderer } from './renderer/arena';
 import './renderer/arena.css';
 import { useGameStore, useGameState } from './ui/store';
+import { useMetaStore } from './ui/metaStore';
+import { HubScreen } from './ui/components/HubScreen';
+import { loadoutToEntries } from './core/meta';
 import { StarterSelection } from './ui/components/StarterSelection';
 import { TeamBar } from './ui/components/TeamBar';
 import { BastionUpgrades } from './ui/components/BastionUpgrades';
@@ -22,6 +25,7 @@ import type {
   BastionUpgrades as BastionUpgradeLevels,
   Cooldowns6,
   GameConfig,
+  GamePhase,
   GameState,
   Team6,
   TeamSlot,
@@ -61,10 +65,13 @@ function emptySlot(index: number): TeamSlot {
   return { index, pokemon: null, isActive: false, hotSwapCooldownSec: 0 };
 }
 
-/** Bootstrap state the loop ticks from; the starter pick flips it to PLAYING. */
-function createInitialState(): GameState {
+/**
+ * Bootstrap state the loop ticks from. STARTER_SELECT on a first launch, MENU
+ * (the Hub) once a starter exists; `startRun` input flips it to PLAYING.
+ */
+function createInitialState(phase: GamePhase = 'STARTER_SELECT'): GameState {
   return {
-    phase: 'STARTER_SELECT',
+    phase,
     floor: 1,
     team: [emptySlot(0), emptySlot(1), emptySlot(2), emptySlot(3), emptySlot(4), emptySlot(5)] as Team6,
     teamLevel: 1,
@@ -98,6 +105,28 @@ export default function App() {
 
   const phase = useGameStore((s) => s.phase);
   const gameState = useGameState();
+  const metaLoaded = useMetaStore((s) => s.loaded);
+  const rewards = useMetaStore((s) => s.rewards);
+
+  // Load the persisted meta (collection, seals, loadout) once.
+  useEffect(() => {
+    void useMetaStore.getState().init();
+  }, []);
+
+  // Once the save is read, a returning player lands in the Hub instead of the starter modal.
+  useEffect(() => {
+    if (!metaLoaded) return;
+    if (useMetaStore.getState().meta.starterChosen && stateRef.current.phase === 'STARTER_SELECT') {
+      stateRef.current = createInitialState('MENU');
+    }
+  }, [metaLoaded]);
+
+  // Pay out Sellos exactly once when a run ends (guarded inside the store).
+  useEffect(() => {
+    if (phase === 'GAME_OVER' && gameState) {
+      useMetaStore.getState().settleFinishedRun(gameState.runStats);
+    }
+  }, [phase, gameState]);
 
   // Simulation loop: one rAF frame == one tickGame call + one draw.
   useEffect(() => {
@@ -161,14 +190,41 @@ export default function App() {
       const y = (e.clientY - rect.top) * (ARENA.SIZE / rect.height);
       useGameStore.getState().requestClickAttack(x, y);
     };
-    canvas.addEventListener('mousedown', onMouseDown);
-    return () => canvas.removeEventListener('mousedown', onMouseDown);
+    // Right click = ultimate (PRD §3.3 "clic secundario"); never opens the browser menu.
+    const onContextMenu = (e: MouseEvent): void => {
+      e.preventDefault();
+      useGameStore.getState().requestUltimate();
+    };
+    const onPrimaryDown = (e: MouseEvent): void => {
+      if (e.button === 0) onMouseDown(e);
+    };
+    canvas.addEventListener('mousedown', onPrimaryDown);
+    canvas.addEventListener('contextmenu', onContextMenu);
+    return () => {
+      canvas.removeEventListener('mousedown', onPrimaryDown);
+      canvas.removeEventListener('contextmenu', onContextMenu);
+    };
   }, []);
 
+  /** First launch: the starter joins the collection, then the player enters the Hub. */
+  const handleStarter = (id: string): void => {
+    useMetaStore.getState().chooseStarter(id);
+    stateRef.current = createInitialState('MENU');
+    useGameStore.getState().startNewGame('MENU');
+  };
+
+  /** Hub -> run, using the loadout configured in the Caja. */
+  const handleStartRun = (): void => {
+    const meta = useMetaStore.getState().meta;
+    useMetaStore.getState().beginRun();
+    useGameStore.getState().requestStartRun(loadoutToEntries(meta));
+  };
+
+  /** Game over -> back to the Hub (collection, gacha and awakening). */
   const handleRestart = (): void => {
-    stateRef.current = createInitialState();
+    stateRef.current = createInitialState('MENU');
     rngRef.current = mulberry32(GAME_CONFIG.seed);
-    useGameStore.getState().startNewGame();
+    useGameStore.getState().startNewGame('MENU');
   };
 
   return (
@@ -182,7 +238,7 @@ export default function App() {
       <div class="flex w-full flex-col gap-4 p-4 lg:h-full lg:w-[26rem] lg:overflow-hidden lg:p-6">
         {gameState && (
           <>
-            <GameHUD gameState={gameState} />
+            <GameHUD gameState={gameState} onUltimate={() => useGameStore.getState().requestUltimate()} />
             <TeamBar
               team={gameState.team}
               hotSwapCooldowns={gameState.hotSwapCooldowns}
@@ -200,11 +256,20 @@ export default function App() {
         )}
       </div>
 
-      {phase === 'STARTER_SELECT' && (
-        <StarterSelection onSelect={(id) => useGameStore.getState().selectStarter(id)} />
+      {!metaLoaded && (
+        <div class="fixed inset-0 z-50 flex items-center justify-center bg-[#2858a8] text-xs text-white">
+          CARGANDO…
+        </div>
       )}
+      {metaLoaded && phase === 'STARTER_SELECT' && <StarterSelection onSelect={handleStarter} />}
+      {metaLoaded && phase === 'MENU' && <HubScreen onStart={handleStartRun} />}
       {phase === 'GAME_OVER' && gameState && (
-        <GameOverModal runStats={gameState.runStats} team={gameState.team} onRestart={handleRestart} />
+        <GameOverModal
+          runStats={gameState.runStats}
+          team={gameState.team}
+          rewards={rewards}
+          onRestart={handleRestart}
+        />
       )}
     </div>
   );

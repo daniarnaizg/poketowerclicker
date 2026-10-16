@@ -1,10 +1,12 @@
 /**
- * PokéBastion — Phase 1 species data: the 3 starter lines (9 species).
+ * PokéBastion — species data. The 3 starter lines (9 species) are written out
+ * in full below; the Phase 2 gacha roster lives in roster.ts and is merged in.
  * Data-driven (PRD §7.1); later phases ingest the full pokedex.json.
  */
 
 import type { PokemonDefinition } from '../core/types';
 import { PokemonType, AttackPattern } from '../core/types';
+import { ROSTER } from './roster';
 
 export const POKEDEX: Readonly<Record<string, PokemonDefinition>> = Object.freeze({
   // --- Charmander line (Fire, canonical 16 / 36) ---
@@ -90,4 +92,7 @@ export const POKEDEX: Readonly<Record<string, PokemonDefinition>> = Object.freez
     ultimate: { id: 'solar_beam', name: 'Tormenta Floral', energyCost: 100 },
     benchPassive: { stat: 'GRASS_DAMAGE', value: 0.16 },
   },
+
+  // --- Phase 2 gacha roster (see roster.ts) ---
+  ...ROSTER,
 });

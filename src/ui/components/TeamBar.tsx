@@ -6,6 +6,10 @@ import type { Cooldowns6, Team6 } from '../../core/types';
 import { POKEDEX } from '../../data/pokemon';
 import { portraitUrl } from '../pokeAssets';
 import { TypeChip } from './TypeChip';
+import { StarRow } from './StarRow';
+import { MAX_STARS } from '../../config/balance.config';
+import { starsOf } from '../../core/passives';
+import { describePassive } from '../passiveText';
 
 interface Props {
   team: Team6;
@@ -30,15 +34,21 @@ export function TeamBar({ team, hotSwapCooldowns, teamLevel, onHotSwap }: Props)
           const onCooldown = cooldown > 0;
           const disabled = !pkm || onCooldown;
           const hpRatio = pkm && pkm.maxHp > 0 ? Math.max(0, Math.min(1, pkm.hp / pkm.maxHp)) : 0;
+          const stars = starsOf(pkm);
+          const shiny = !!pkm && stars >= MAX_STARS;
+          const passive = pkm ? POKEDEX[pkm.definitionId].benchPassive : null;
           return (
             <button
               key={i}
               type="button"
               disabled={disabled}
               onClick={() => onHotSwap(i)}
+              title={pkm && passive && stars >= 2 ? `Pasiva: ${describePassive(passive.stat, passive.value * (shiny ? 2 : 1))}` : undefined}
+              data-testid={`team-slot-${i}`}
               class={`pk-btn relative flex flex-col items-center gap-1 px-1 py-2 text-[9px] ${
                 slot.isActive ? 'pk-btn-active' : ''
               }`}
+              style={shiny ? { borderColor: '#e0a000', boxShadow: '0 4px 0 #e0a000, 0 0 8px #ffd860' } : undefined}
             >
               <span class="absolute left-1 top-1 text-[9px]">{i + 1}</span>
               {pkm ? (
@@ -56,6 +66,7 @@ export function TeamBar({ team, hotSwapCooldowns, teamLevel, onHotSwap }: Props)
                 {pkm ? POKEDEX[pkm.definitionId].name : '—'}
               </span>
               {pkm && <TypeChip type={pkm.types[0]} />}
+              {pkm && <StarRow stars={stars} size={7} />}
               <span class="pk-num">Nv {teamLevel}</span>
               <span class="pk-bar w-full">
                 <span style={{ width: `${hpRatio * 100}%`, background: hpColor(hpRatio) }} />

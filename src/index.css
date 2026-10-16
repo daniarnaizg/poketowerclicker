@@ -52,3 +52,8 @@ body {
   .pk-num { font-family: 'VT323', monospace; font-size: 22px; line-height: 1; }
   .pk-sprite { image-rendering: pixelated; }
 }
+
+@keyframes pk-pulse {
+  0%, 100% { filter: brightness(1); }
+  50% { filter: brightness(1.25); }
+}

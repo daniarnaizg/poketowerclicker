@@ -97,6 +97,11 @@ export interface PlayerPokemon extends Entity {
   ultimateMax: number;
   /** 0 = base form, 1 = first evolution, 2 = final evolution. */
   evolutionStage: number;
+  /**
+   * Awakening rank 1..5 (PRD §3.1), copied from the collection at run start.
+   * Optional: undefined is treated as 1★. 5★ also means "Shiny".
+   */
+  stars?: number;
 }
 
 export interface Enemy extends Entity {
@@ -109,6 +114,24 @@ export interface Enemy extends Entity {
   bossTimerSec?: number;
   /** Species id for sprite lookup / boss identity. */
   definitionId: string;
+  /** Active status ailments (Phase 2); absent when the enemy is clean. */
+  status?: EnemyStatus;
+}
+
+/** Status ailments applied by 3★ Switch-In bonuses and some ultimates. */
+export type StatusKind = 'BURN' | 'PARALYZE' | 'SLOW';
+/** Switch-In bonus effect: a status on enemies, or a temporary bastion shield. */
+export type SwitchInEffect = StatusKind | 'SHIELD';
+
+export interface EnemyStatus {
+  /** Remaining seconds per ailment (0/undefined = inactive). */
+  burnSec?: number;
+  /** Burn damage per second (true damage, ignores type chart). */
+  burnDps?: number;
+  /** Team slot credited with burn damage / kills. */
+  burnSlot?: number;
+  slowSec?: number;
+  paralyzeSec?: number;
 }
 
 export interface Projectile {
@@ -126,6 +149,8 @@ export interface Projectile {
   bounce?: number;
   /** Enemy ids already hit by this projectile (prevents double-hits). */
   hitIds?: number[];
+  /** AOE pattern: radius (px) of the explosion around the impacted enemy. */
+  splashRadius?: number;
 }
 
 export interface FloatingText {
@@ -199,7 +224,11 @@ export const BASTION_UPGRADE_IDS: readonly BastionUpgradeId[] = [
 /** Level of each upgrade (0 = not purchased). */
 export type BastionUpgrades = Record<BastionUpgradeId, number>;
 
-export type GamePhase = 'STARTER_SELECT' | 'PLAYING' | 'GAME_OVER';
+/**
+ * STARTER_SELECT: first launch only. MENU: between runs (Santuario / Caja).
+ * Both accept `startRun` / `selectStarter` input; only PLAYING simulates.
+ */
+export type GamePhase = 'STARTER_SELECT' | 'MENU' | 'PLAYING' | 'GAME_OVER';
 
 export type Team6 = [TeamSlot, TeamSlot, TeamSlot, TeamSlot, TeamSlot, TeamSlot];
 export type Cooldowns6 = [number, number, number, number, number, number];
@@ -229,6 +258,30 @@ export interface GameState {
   /** Canonical hot-swap cooldowns per slot index, seconds remaining. */
   hotSwapCooldowns: Cooldowns6;
   runStats: RunStats;
+  /** Seconds of remaining bastion shield (3★ Switch-In); blocks contact damage. */
+  bastionShieldSec?: number;
+  /** Short-lived visual cues (ultimates, switch-in rings) consumed by the renderer. */
+  effects?: VisualEffect[];
+}
+
+/** Purely cosmetic effect; the core ages and expires it like floating text. */
+export interface VisualEffect {
+  id: number;
+  kind: 'BEAM' | 'NOVA' | 'FLASH' | 'RING';
+  /** Origin (arena logical px). */
+  x: number;
+  y: number;
+  /** BEAM end point. */
+  x2?: number;
+  y2?: number;
+  /** NOVA / RING final radius. */
+  radius?: number;
+  /** Beam width (px). */
+  width?: number;
+  /** Primary elemental type; the renderer maps it to a color. */
+  type: PokemonType;
+  age: number;
+  maxAge: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -269,6 +322,47 @@ export interface GameInput {
   buyUpgrade?: BastionUpgradeId;
   /** Purchase one Team Level (gold). */
   buyTeamLevel?: boolean;
-  /** Starter selection (only valid in STARTER_SELECT phase). */
+  /** Starter selection (only valid in STARTER_SELECT / MENU phase). Starts a 1-Pokémon run. */
   selectStarter?: string;
+  /**
+   * Start a run with a 6-slot loadout (null = empty slot). Valid in
+   * STARTER_SELECT / MENU. The first filled slot becomes the active Pokémon.
+   */
+  startRun?: (LoadoutEntry | null)[];
+}
+
+// ---------------------------------------------------------------------------
+// Gacha / collection contracts (Phase 2, PRD §3.1)
+// ---------------------------------------------------------------------------
+
+/** Gacha rarity tiers: COMMON ★, RARE ★★, EPIC ★★★, LEGENDARY ★★★★. */
+export type Rarity = 'COMMON' | 'RARE' | 'EPIC' | 'LEGENDARY';
+export const RARITIES: readonly Rarity[] = ['COMMON', 'RARE', 'EPIC', 'LEGENDARY'] as const;
+
+/** One team slot as handed to the core at run start. */
+export interface LoadoutEntry {
+  /** Base-form species id of the line (the run evolves it via Team Level). */
+  definitionId: string;
+  /** Awakening rank 1..5. */
+  stars: number;
+}
+
+// ---------------------------------------------------------------------------
+// Ultimates (Phase 2, PRD §3.2)
+// ---------------------------------------------------------------------------
+
+/**
+ * ARENA: hits every enemy. NOVA: burst around the bastion (radius = size).
+ * BEAM: piercing line toward the nearest enemy (half-width = size).
+ */
+export type UltimateShape = 'ARENA' | 'NOVA' | 'BEAM';
+
+export interface UltimateDef {
+  shape: UltimateShape;
+  /** Multiplier over PROJECTILE_BASE_DAMAGE. */
+  power: number;
+  /** NOVA radius / BEAM half-width, logical px. */
+  size?: number;
+  /** Ailment applied to every enemy hit. */
+  status?: StatusKind;
 }

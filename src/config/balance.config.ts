@@ -3,7 +3,8 @@
  * Imported by core, renderer and UI. Never hardcode these values elsewhere.
  */
 
-import type { BastionUpgradeId } from '../core/types';
+import { PokemonType } from '../core/types';
+import type { BastionUpgradeId, Rarity, SwitchInEffect } from '../core/types';
 
 // ---------------------------------------------------------------------------
 // Arena & loop
@@ -110,6 +111,142 @@ export function enemySpeed(floor: number): number {
 }
 
 // ---------------------------------------------------------------------------
+// Phase 2 — Ultimates (PRD §3.2). Damage/shape per move lives in data/ultimates.ts.
+// ---------------------------------------------------------------------------
+
+/** Ultimate energy gained per projectile hit that deals damage. */
+export const ULTIMATE_CHARGE_PER_HIT = 1;
+/** Ultimate energy gained per click that hits at least one enemy. */
+export const ULTIMATE_CHARGE_PER_CLICK = 5;
+
+// ---------------------------------------------------------------------------
+// Phase 2 — Switch-In (PRD §3.3) & status effects (PRD §3.1, 3★)
+// ---------------------------------------------------------------------------
+
+/** Radius (px) of the burst the incoming Pokémon detonates at the bastion. */
+export const SWITCH_IN_RADIUS = 60;
+/** Burst base damage = incoming ATK x this. */
+export const SWITCH_IN_DAMAGE_MULTIPLIER = 2;
+
+/** Duration (s) of each Switch-In effect when the incoming Pokémon has 3★+. */
+export const SWITCH_IN_EFFECT_DURATION: Readonly<Record<SwitchInEffect, number>> = {
+  BURN: 4,
+  PARALYZE: 1.5,
+  SLOW: 4,
+  SHIELD: 3,
+};
+/** Status duration (s) applied by ultimates that carry one. */
+export const ULTIMATE_STATUS_DURATION = 3;
+
+/** Burn DPS = PROJECTILE_BASE_DAMAGE x (atk/50) x levelScale x this. */
+export const BURN_DPS_FACTOR = 0.6;
+/** Movement multiplier while slowed. Paralysis freezes movement entirely. */
+export const SLOW_SPEED_FACTOR = 0.5;
+/** Bosses only suffer this fraction of a status duration. */
+export const BOSS_STATUS_DURATION_FACTOR = 0.5;
+
+/**
+ * Which effect a 3★+ Switch-In applies, by the incoming Pokémon's PRIMARY type.
+ * Every one of the 18 types is covered (enforced by a unit test).
+ */
+export const SWITCH_IN_EFFECT_BY_TYPE: Readonly<Record<PokemonType, SwitchInEffect>> = {
+  [PokemonType.Fire]: 'BURN',
+  [PokemonType.Poison]: 'BURN',
+  [PokemonType.Bug]: 'BURN',
+  [PokemonType.Dark]: 'BURN',
+  [PokemonType.Electric]: 'PARALYZE',
+  [PokemonType.Psychic]: 'PARALYZE',
+  [PokemonType.Ghost]: 'PARALYZE',
+  [PokemonType.Fighting]: 'PARALYZE',
+  [PokemonType.Water]: 'SLOW',
+  [PokemonType.Ice]: 'SLOW',
+  [PokemonType.Grass]: 'SLOW',
+  [PokemonType.Ground]: 'SLOW',
+  [PokemonType.Normal]: 'SHIELD',
+  [PokemonType.Flying]: 'SHIELD',
+  [PokemonType.Rock]: 'SHIELD',
+  [PokemonType.Steel]: 'SHIELD',
+  [PokemonType.Dragon]: 'SHIELD',
+  [PokemonType.Fairy]: 'SHIELD',
+};
+
+// ---------------------------------------------------------------------------
+// Phase 2 — Awakening stars (PRD §3.1 "Lógica de las Estrellas de Despertar")
+// ---------------------------------------------------------------------------
+
+export const MAX_STARS = 5;
+/** 2★: BENCH_PASSIVE unlocks. */
+export const STAR_BENCH_PASSIVE = 2;
+/** 3★: Switch-In applies a status / shield. */
+export const STAR_SWITCH_IN = 3;
+/** 4★: firing pattern evolves (pierce / bigger AoE / +1 bounce). */
+export const STAR_PATTERN = 4;
+/** 5★: Shiny aura + doubled BENCH_PASSIVE. */
+export const STAR_SHINY = 5;
+/** BENCH_PASSIVE multiplier at 5★ ("Duplica Pasiva"). */
+export const BENCH_PASSIVE_MAX_STAR_MULTIPLIER = 2;
+/**
+ * PRD: the passive is granted "incluso estando en reserva". true = it applies to
+ * every Pokémon in the 6-slot team (active or not). false = bench only, so the
+ * active Pokémon does NOT buff the team (adds a tactical trade-off to swapping).
+ */
+export const BENCH_PASSIVE_ACTIVE_COUNTS = true;
+/** Safety cap on any single aggregated passive bonus (+150%). */
+export const BENCH_BONUS_CAP = 1.5;
+
+/** 4★ AOE: base splash radius (px) and the 4★ multiplier. */
+export const AOE_SPLASH_RADIUS = 36;
+export const AOE_SPLASH_STAR_MULTIPLIER = 1.5;
+/** Splash damage as a fraction of the direct hit. */
+export const AOE_SPLASH_DAMAGE_FACTOR = 0.6;
+/** 4★ SNIPER / PULSE: extra enemies a projectile passes through. */
+export const SNIPER_PIERCE_AT_MAX_PATTERN = 2;
+export const PULSE_PIERCE_AT_MAX_PATTERN = 3;
+/** 4★ CHAIN: extra bounces. */
+export const CHAIN_EXTRA_BOUNCES_AT_MAX_PATTERN = 1;
+
+/** Fragments of Vínculo needed to reach each rank (index = target rank). */
+export const AWAKEN_FRAGMENT_COST: readonly number[] = [0, 0, 3, 5, 8, 12];
+/** Fragments granted by a duplicate pull, by rarity. */
+export const DUPLICATE_FRAGMENTS: Readonly<Record<Rarity, number>> = {
+  COMMON: 1,
+  RARE: 2,
+  EPIC: 4,
+  LEGENDARY: 8,
+};
+
+// ---------------------------------------------------------------------------
+// Phase 2 — Gacha (PRD §3.1)
+// ---------------------------------------------------------------------------
+
+/** Probability per rarity; must sum to 1 (enforced by a unit test). */
+export const GACHA_RATES: Readonly<Record<Rarity, number>> = {
+  COMMON: 0.6,
+  RARE: 0.3,
+  EPIC: 0.08,
+  LEGENDARY: 0.02,
+};
+/** Pity: a ★★★+ is guaranteed every N pulls, a ★★★★ every M pulls. */
+export const GACHA_PITY_EPIC = 30;
+export const GACHA_PITY_LEGENDARY = 80;
+/** Sellos de Reclutamiento per pull. */
+export const GACHA_PULL_COST = 1;
+export const GACHA_MULTI_PULL = 10;
+
+// ---------------------------------------------------------------------------
+// Phase 2 — Sellos de Reclutamiento income (PRD §3.1 "Moneda Gacha")
+// ---------------------------------------------------------------------------
+
+/** Welcome gift when the starter is chosen: one free 10-pull. */
+export const STARTING_SEALS = 10;
+/** First-ever victory over a Mini-Boss floor (every 10 floors). */
+export const SEALS_FIRST_CLEAR_MINIBOSS = 3;
+/** First-ever victory over a Major Boss floor (50 / 100). */
+export const SEALS_FIRST_CLEAR_MAJOR_BOSS = 10;
+/** "Ascensión": 1 seal per N floors reached at the end of every run. */
+export const SEALS_ASCENSION_FLOORS_PER_SEAL = 5;
+
+// ---------------------------------------------------------------------------
 // Meta-progression (PRD §4.3)
 // ---------------------------------------------------------------------------
 
@@ -152,4 +289,13 @@ export const BALANCE = Object.freeze({
   BASTION_REGEN_FRACTION_PER_SEC,
   MULTI_MAX,
   RUNE_DAMAGE_BONUS,
+  ULTIMATE_CHARGE_PER_HIT,
+  ULTIMATE_CHARGE_PER_CLICK,
+  SWITCH_IN_RADIUS,
+  SWITCH_IN_DAMAGE_MULTIPLIER,
+  MAX_STARS,
+  GACHA_PITY_EPIC,
+  GACHA_PITY_LEGENDARY,
+  GACHA_PULL_COST,
+  STARTING_SEALS,
 });
