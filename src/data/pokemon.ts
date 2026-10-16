@@ -16,7 +16,7 @@ export const POKEDEX: Readonly<Record<string, PokemonDefinition>> = Object.freez
     baseStats: { atk: 12, spd: 1.0, critRate: 0.05, critDmg: 1.5 },
     pattern: AttackPattern.SNIPER,
     evolution: { targetId: '0005', canonicalLevel: 16 },
-    ultimate: { id: 'flamethrower', name: 'Llamarada', energyCost: 100 },
+    ultimate: { id: 'flamethrower', name: 'Llamarada', cooldownSec: 30 },
     benchPassive: { stat: 'FIRE_DAMAGE', value: 0.08 },
   },
   '0005': {
@@ -25,7 +25,7 @@ export const POKEDEX: Readonly<Record<string, PokemonDefinition>> = Object.freez
     baseStats: { atk: 20, spd: 1.05, critRate: 0.06, critDmg: 1.55 },
     pattern: AttackPattern.SNIPER,
     evolution: { targetId: '0006', canonicalLevel: 36 },
-    ultimate: { id: 'flamethrower', name: 'Llamarada', energyCost: 100 },
+    ultimate: { id: 'flamethrower', name: 'Llamarada', cooldownSec: 26 },
     benchPassive: { stat: 'FIRE_DAMAGE', value: 0.12 },
   },
   '0006': {
@@ -33,7 +33,7 @@ export const POKEDEX: Readonly<Record<string, PokemonDefinition>> = Object.freez
     types: [PokemonType.Fire, PokemonType.Flying],
     baseStats: { atk: 32, spd: 0.9, critRate: 0.07, critDmg: 1.6 },
     pattern: AttackPattern.AOE,
-    ultimate: { id: 'fire_blast', name: 'Llamarada', energyCost: 100 },
+    ultimate: { id: 'fire_blast', name: 'Llamarada', cooldownSec: 22 },
     benchPassive: { stat: 'FIRE_DAMAGE', value: 0.16 },
   },
 
@@ -44,7 +44,7 @@ export const POKEDEX: Readonly<Record<string, PokemonDefinition>> = Object.freez
     baseStats: { atk: 11, spd: 1.0, critRate: 0.05, critDmg: 1.5 },
     pattern: AttackPattern.SNIPER,
     evolution: { targetId: '0008', canonicalLevel: 16 },
-    ultimate: { id: 'water_gun', name: 'Hidrobomba', energyCost: 100 },
+    ultimate: { id: 'water_gun', name: 'Hidrobomba', cooldownSec: 30 },
     benchPassive: { stat: 'WATER_DAMAGE', value: 0.08 },
   },
   '0008': {
@@ -53,7 +53,7 @@ export const POKEDEX: Readonly<Record<string, PokemonDefinition>> = Object.freez
     baseStats: { atk: 18, spd: 1.05, critRate: 0.06, critDmg: 1.55 },
     pattern: AttackPattern.SNIPER,
     evolution: { targetId: '0009', canonicalLevel: 36 },
-    ultimate: { id: 'water_gun', name: 'Hidrobomba', energyCost: 100 },
+    ultimate: { id: 'water_gun', name: 'Hidrobomba', cooldownSec: 26 },
     benchPassive: { stat: 'WATER_DAMAGE', value: 0.12 },
   },
   '0009': {
@@ -61,7 +61,7 @@ export const POKEDEX: Readonly<Record<string, PokemonDefinition>> = Object.freez
     types: [PokemonType.Water],
     baseStats: { atk: 30, spd: 0.85, critRate: 0.06, critDmg: 1.6 },
     pattern: AttackPattern.AOE,
-    ultimate: { id: 'hydro_pump', name: 'Hidrobomba', energyCost: 100 },
+    ultimate: { id: 'hydro_pump', name: 'Hidrobomba', cooldownSec: 22 },
     benchPassive: { stat: 'WATER_DAMAGE', value: 0.16 },
   },
 
@@ -72,7 +72,7 @@ export const POKEDEX: Readonly<Record<string, PokemonDefinition>> = Object.freez
     baseStats: { atk: 10, spd: 0.9, critRate: 0.05, critDmg: 1.5 },
     pattern: AttackPattern.PULSE,
     evolution: { targetId: '0002', canonicalLevel: 16 },
-    ultimate: { id: 'vine_whip', name: 'Tormenta Floral', energyCost: 100 },
+    ultimate: { id: 'vine_whip', name: 'Tormenta Floral', cooldownSec: 30 },
     benchPassive: { stat: 'GRASS_DAMAGE', value: 0.08 },
   },
   '0002': {
@@ -81,7 +81,7 @@ export const POKEDEX: Readonly<Record<string, PokemonDefinition>> = Object.freez
     baseStats: { atk: 17, spd: 0.95, critRate: 0.06, critDmg: 1.55 },
     pattern: AttackPattern.PULSE,
     evolution: { targetId: '0003', canonicalLevel: 36 },
-    ultimate: { id: 'vine_whip', name: 'Tormenta Floral', energyCost: 100 },
+    ultimate: { id: 'vine_whip', name: 'Tormenta Floral', cooldownSec: 26 },
     benchPassive: { stat: 'GRASS_DAMAGE', value: 0.12 },
   },
   '0003': {
@@ -89,7 +89,7 @@ export const POKEDEX: Readonly<Record<string, PokemonDefinition>> = Object.freez
     types: [PokemonType.Grass, PokemonType.Poison],
     baseStats: { atk: 28, spd: 0.8, critRate: 0.06, critDmg: 1.6 },
     pattern: AttackPattern.AOE,
-    ultimate: { id: 'solar_beam', name: 'Tormenta Floral', energyCost: 100 },
+    ultimate: { id: 'solar_beam', name: 'Tormenta Floral', cooldownSec: 22 },
     benchPassive: { stat: 'GRASS_DAMAGE', value: 0.16 },
   },
 

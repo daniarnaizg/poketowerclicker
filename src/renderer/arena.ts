@@ -120,8 +120,8 @@ export function renderPokemon(
 ): void {
   const r = ARENA.PLAYER_HITBOX_R;
   const set = getSprite(pokemon.definitionId);
-  // 5★ "Aspecto Shiny": golden aura + sparkles behind the sprite.
-  if ((pokemon.stars ?? 1) >= MAX_STARS) drawShinyAura(ctx, x, y, r, opts.now ?? performance.now());
+  // 5★ Aura Apex: golden aura + sparkles behind the sprite.
+  if ((pokemon.stars ?? 1) >= MAX_STARS) drawApexAura(ctx, x, y, r, opts.now ?? performance.now());
   if (!set) {
     drawEntityCircle(ctx, x, y, r, typeColor(pokemon.types[0]));
     drawTypeLabel(ctx, pokemon.types, x, y);
@@ -131,8 +131,8 @@ export function renderPokemon(
   drawSprite(ctx, set, opts.anim ?? 'idle', dirRow(opts.dx ?? 0, opts.dy ?? 1), opts.now ?? performance.now(), x, y, r * 4);
 }
 
-/** Pulsing golden glow with four orbiting sparkles (5★ / Shiny). */
-function drawShinyAura(ctx: CanvasRenderingContext2D, x: number, y: number, r: number, now: number): void {
+/** Pulsing golden glow with four orbiting sparkles (5★ Aura Apex). */
+function drawApexAura(ctx: CanvasRenderingContext2D, x: number, y: number, r: number, now: number): void {
   const pulse = 0.75 + 0.25 * Math.sin(now / 260);
   const g = ctx.createRadialGradient(x, y, r * 0.3, x, y, r * 2.4);
   g.addColorStop(0, `rgba(255,224,96,${0.55 * pulse})`);
@@ -167,22 +167,21 @@ function drawShield(ctx: CanvasRenderingContext2D, secLeft: number, now: number)
   ctx.globalAlpha = 1;
 }
 
-const STATUS_PIP: { key: 'burnSec' | 'slowSec' | 'paralyzeSec'; color: string }[] = [
-  { key: 'burnSec', color: '#f08030' },
-  { key: 'slowSec', color: '#58b0f8' },
-  { key: 'paralyzeSec', color: '#f8d030' },
-];
+const STATUS_COLOR: Record<string, string> = {
+  BURN: '#f08030',
+  SLOW: '#58b0f8',
+  PARALYZE: '#f8d030',
+};
 
 /** Small colored squares over an enemy for each active ailment. */
 function drawStatusPips(ctx: CanvasRenderingContext2D, enemy: Enemy, y: number): void {
-  const st = enemy.status;
-  if (!st) return;
-  const active = STATUS_PIP.filter((p) => (st[p.key] ?? 0) > 0);
-  active.forEach((p, i) => {
-    const px = Math.round(enemy.x - (active.length * 8) / 2 + i * 8);
+  const statuses = enemy.statuses;
+  if (!statuses || statuses.length === 0) return;
+  statuses.forEach((st, i) => {
+    const px = Math.round(enemy.x - (statuses.length * 8) / 2 + i * 8);
     ctx.fillStyle = INK;
     ctx.fillRect(px - 1, y - 1, 8, 8);
-    ctx.fillStyle = p.color;
+    ctx.fillStyle = STATUS_COLOR[st.id] ?? INK;
     ctx.fillRect(px, y, 6, 6);
   });
 }

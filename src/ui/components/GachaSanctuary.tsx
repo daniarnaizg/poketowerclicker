@@ -61,7 +61,7 @@ export function GachaSanctuary() {
       <div class="flex flex-wrap gap-2 text-[8px]">
         {RARITIES.map((r) => (
           <span key={r} class="pk-chip" style={{ backgroundColor: RARITY_COLOR[r] }}>
-            {'★'.repeat(RARITY_TIER[r])} {RARITY_LABEL[r]} {Math.round(GACHA_RATES[r] * 100)}%
+            {'★'.repeat(RARITY_TIER[r])} RANGO {RARITY_LABEL[r]} {Math.round(GACHA_RATES[r] * 100)}%
           </span>
         ))}
       </div>

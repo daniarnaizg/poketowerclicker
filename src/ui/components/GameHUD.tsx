@@ -10,6 +10,10 @@ interface Props {
   gameState: GameState;
   /** Fire the ultimate (also Space / right click). */
   onUltimate?: () => void;
+  /** Flip auto-advance to the next floor after the breather. */
+  onToggleAutoAdvance?: () => void;
+  /** Spawn the next floor now (during the breather / manual wait). */
+  onStartNextWave?: () => void;
 }
 
 function formatClock(totalSec: number): string {
@@ -19,7 +23,7 @@ function formatClock(totalSec: number): string {
   return `${mm}:${ss}`;
 }
 
-export function GameHUD({ gameState, onUltimate }: Props) {
+export function GameHUD({ gameState, onUltimate, onToggleAutoAdvance, onStartNextWave }: Props) {
   const hpRatio =
     gameState.bastionMaxHp > 0
       ? Math.max(0, Math.min(1, gameState.bastionHp / gameState.bastionMaxHp))
@@ -33,6 +37,10 @@ export function GameHUD({ gameState, onUltimate }: Props) {
   const ultReady = gameState.ultimateMax > 0 && gameState.ultimateCharge >= gameState.ultimateMax;
   const shield = gameState.bastionShieldSec ?? 0;
   const hpColor = hpRatio > 0.5 ? '#48c048' : hpRatio >= 0.25 ? '#f8d030' : '#f04040';
+  // Undefined autoAdvanceWave means ON (headless sims and old states keep auto-advancing).
+  const auto = gameState.autoAdvanceWave !== false;
+  const inBreak = !!gameState.awaitingNextWave || gameState.interWaveTimerSec !== undefined;
+  const ultRemainingSec = Math.ceil(gameState.ultimateMax - gameState.ultimateCharge);
 
   return (
     <div class="pk-window flex shrink-0 flex-col gap-2.5 p-3">
@@ -44,6 +52,30 @@ export function GameHUD({ gameState, onUltimate }: Props) {
             {formatClock(gameState.bossTimerSec)}/{BOSS_TIMER_DURATION}s
           </span>
         )}
+      </div>
+
+      <div class="flex items-center gap-2 text-[9px]">
+        <button
+          type="button"
+          onClick={onToggleAutoAdvance}
+          class={`pk-chip cursor-pointer ${auto ? '' : 'opacity-60'}`}
+          style={{ background: auto ? '#48c048' : '#585858' }}
+        >
+          AUTO {auto ? 'ON' : 'OFF'}
+        </button>
+        <button
+          type="button"
+          onClick={onStartNextWave}
+          disabled={!inBreak}
+          class="pk-btn flex-1 px-2 py-1 text-[9px]"
+          data-testid="next-wave-button"
+        >
+          {inBreak
+            ? gameState.interWaveTimerSec !== undefined
+              ? `SIGUIENTE PISO (${Math.ceil(gameState.interWaveTimerSec)}s)`
+              : 'SIGUIENTE PISO'
+            : `PISO ${gameState.floor}`}
+        </button>
       </div>
 
       <div class="flex items-center gap-2 text-[9px]">
@@ -72,7 +104,11 @@ export function GameHUD({ gameState, onUltimate }: Props) {
         style={ultReady ? { animation: 'pk-pulse 0.8s ease-in-out infinite' } : undefined}
       >
         <span class="flex items-center justify-between gap-2">
-          <span class="truncate">{ultReady ? `¡${(ultName ?? 'DEFINITIVA').toUpperCase()}!` : `DEF. ${(ultName ?? '').toUpperCase()}`}</span>
+          <span class="truncate">
+            {ultReady
+              ? `¡${(ultName ?? 'DEFINITIVA').toUpperCase()}!`
+              : `DEF. ${(ultName ?? '').toUpperCase()} · ${ultRemainingSec}s`}
+          </span>
           <span class="pk-chip" style={{ background: '#585858' }}>ESPACIO</span>
         </span>
         <span class="pk-bar w-full">

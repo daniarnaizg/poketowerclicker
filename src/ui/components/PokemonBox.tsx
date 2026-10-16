@@ -7,9 +7,9 @@ import { useState } from 'preact/hooks';
 import {
   AWAKEN_FRAGMENT_COST,
   MAX_STARS,
+  STAR_AURA_APEX,
   STAR_BENCH_PASSIVE,
   STAR_PATTERN,
-  STAR_SHINY,
   STAR_SWITCH_IN,
   SWITCH_IN_EFFECT_BY_TYPE,
 } from '../../config/balance.config';
@@ -58,7 +58,7 @@ export function PokemonBox() {
         { star: STAR_BENCH_PASSIVE, text: `Pasiva de equipo: ${describePassive(def.benchPassive.stat, def.benchPassive.value)}` },
         { star: STAR_SWITCH_IN, text: `Relevo: ${EFFECT_LABEL[SWITCH_IN_EFFECT_BY_TYPE[def.types[0]]]}` },
         { star: STAR_PATTERN, text: `${PATTERN_LABEL[def.pattern]}: ${PATTERN_UPGRADE_TEXT[def.pattern]}` },
-        { star: STAR_SHINY, text: 'Aura Shiny dorada + pasiva ×2' },
+        { star: STAR_AURA_APEX, text: 'Aura Apex dorada + pasiva ×2' },
       ]
     : [];
 
@@ -138,11 +138,12 @@ export function PokemonBox() {
                   <span class="truncate text-[10px]">{def.name.toUpperCase()}</span>
                   <span class="flex flex-wrap items-center gap-1">
                     {def.types.map((t) => <TypeChip key={t} type={t} />)}
-                    <span class="pk-chip" style={{ backgroundColor: RARITY_COLOR[rarity] }}>{RARITY_LABEL[rarity]}</span>
+                    <span class="pk-chip" style={{ backgroundColor: RARITY_COLOR[rarity] }}>RANGO {RARITY_LABEL[rarity]}</span>
                   </span>
                 </div>
               </div>
               <div>
+                <span class="mr-2 text-[#a8c0e0]">ESTRELLAS</span>
                 <StarRow stars={entry.stars} size={12} />
                 <span class="ml-2 text-[#a8c0e0]">
                   {cost === null ? 'MÁX.' : `${entry.fragments}/${cost} frag.`}

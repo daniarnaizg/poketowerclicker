@@ -66,7 +66,8 @@ export interface PokemonDefinition {
   pattern: AttackPattern;
   /** Canonical evolution: triggers when unified Team Level >= canonicalLevel. */
   evolution?: { targetId: string; canonicalLevel: number };
-  ultimate: { id: string; name: string; energyCost: number };
+  /** Signature move; cooldownSec is the charge time in seconds (see gameLoop). */
+  ultimate: { id: string; name: string; cooldownSec: number };
   /** BENCH_PASSIVE: stat key + fractional bonus (0.08 = +8%). */
   benchPassive: { stat: string; value: number };
 }
@@ -93,15 +94,20 @@ export interface PlayerPokemon extends Entity {
   critRate: number;
   critDmg: number;
   pattern: AttackPattern;
+  /** Seconds accumulated toward the ultimate (0..ultimateMax). */
   ultimateEnergy: number;
+  /** Ultimate cooldown in seconds. */
   ultimateMax: number;
   /** 0 = base form, 1 = first evolution, 2 = final evolution. */
   evolutionStage: number;
   /**
    * Awakening rank 1..5 (PRD §3.1), copied from the collection at run start.
-   * Optional: undefined is treated as 1★. 5★ also means "Shiny".
+   * Optional: undefined is treated as 1★.
+   * 5★ = Aura Apex (golden aura + doubled bench passive).
    */
   stars?: number;
+  /** Shiny collectible flag (Phase 3C); always false in Phase 2. */
+  shinyActive?: boolean;
 }
 
 export interface Enemy extends Entity {
@@ -115,7 +121,7 @@ export interface Enemy extends Entity {
   /** Species id for sprite lookup / boss identity. */
   definitionId: string;
   /** Active status ailments (Phase 2); absent when the enemy is clean. */
-  status?: EnemyStatus;
+  statuses?: StatusInstance[];
 }
 
 /** Status ailments applied by 3★ Switch-In bonuses and some ultimates. */
@@ -123,15 +129,17 @@ export type StatusKind = 'BURN' | 'PARALYZE' | 'SLOW';
 /** Switch-In bonus effect: a status on enemies, or a temporary bastion shield. */
 export type SwitchInEffect = StatusKind | 'SHIELD';
 
-export interface EnemyStatus {
-  /** Remaining seconds per ailment (0/undefined = inactive). */
-  burnSec?: number;
-  /** Burn damage per second (true damage, ignores type chart). */
-  burnDps?: number;
-  /** Team slot credited with burn damage / kills. */
-  burnSlot?: number;
-  slowSec?: number;
-  paralyzeSec?: number;
+/** One active ailment on an enemy. */
+export interface StatusInstance {
+  /** 'BURN' | 'PARALYZE' | 'SLOW' (3B adds 'POISON', 'FREEZE'). */
+  id: string;
+  remainingSec: number;
+  /** Unused in Phase 2; data prep for 3B synergies. */
+  stacks?: number;
+  /** Team slot credited with the damage/kills. */
+  sourceSlot?: number;
+  /** BURN only: damage/sec = fraction of the triggering hit. */
+  dps?: number;
 }
 
 export interface Projectile {
@@ -208,7 +216,8 @@ export type BastionUpgradeId =
   | 'UP_SPD'
   | 'UP_CRIT'
   | 'UP_CDMG'
-  | 'UP_GOLD';
+  | 'UP_GOLD'
+  | 'UP_WALL';
 
 export const BASTION_UPGRADE_IDS: readonly BastionUpgradeId[] = [
   'UP_CLICK',
@@ -219,6 +228,7 @@ export const BASTION_UPGRADE_IDS: readonly BastionUpgradeId[] = [
   'UP_CRIT',
   'UP_CDMG',
   'UP_GOLD',
+  'UP_WALL',
 ] as const;
 
 /** Level of each upgrade (0 = not purchased). */
@@ -250,11 +260,18 @@ export interface GameState {
   floatingTexts: FloatingText[];
   /** Remaining boss kill-timer; undefined when no boss is active. */
   bossTimerSec?: number;
-  /** Ultimate charge of the ACTIVE Pokémon mirrored at run level (0..ultimateMax). */
+  /** Ultimate charge of the ACTIVE Pokémon mirrored at run level (seconds, 0..ultimateMax). */
   ultimateCharge: number;
+  /** Ultimate cooldown in seconds (mirror of the active Pokémon's). */
   ultimateMax: number;
-  /** Enemies still to spawn/kill in the current wave. */
+  /** Enemies still to spawn/kill in the current wave (0 during the inter-wave break). */
   waveEnemiesRemaining: number;
+  /** Auto-advance to the next floor after the breather; undefined = true. */
+  autoAdvanceWave?: boolean;
+  /** Seconds left on the inter-wave breather; undefined when none is running. */
+  interWaveTimerSec?: number;
+  /** true when the floor is cleared with auto-advance off (waiting for the player). */
+  awaitingNextWave?: boolean;
   /** Canonical hot-swap cooldowns per slot index, seconds remaining. */
   hotSwapCooldowns: Cooldowns6;
   runStats: RunStats;
@@ -322,6 +339,10 @@ export interface GameInput {
   buyUpgrade?: BastionUpgradeId;
   /** Purchase one Team Level (gold). */
   buyTeamLevel?: boolean;
+  /** Spawn the next floor now (skips the breather / the manual wait). */
+  startNextWave?: boolean;
+  /** Turn the automatic inter-wave advance on or off. */
+  setAutoAdvance?: boolean;
   /** Starter selection (only valid in STARTER_SELECT / MENU phase). Starts a 1-Pokémon run. */
   selectStarter?: string;
   /**
@@ -345,6 +366,8 @@ export interface LoadoutEntry {
   definitionId: string;
   /** Awakening rank 1..5. */
   stars: number;
+  /** Shiny collectible flag (Phase 3C); always false in Phase 2. */
+  shinyActive?: boolean;
 }
 
 // ---------------------------------------------------------------------------

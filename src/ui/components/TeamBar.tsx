@@ -35,7 +35,7 @@ export function TeamBar({ team, hotSwapCooldowns, teamLevel, onHotSwap }: Props)
           const disabled = !pkm || onCooldown;
           const hpRatio = pkm && pkm.maxHp > 0 ? Math.max(0, Math.min(1, pkm.hp / pkm.maxHp)) : 0;
           const stars = starsOf(pkm);
-          const shiny = !!pkm && stars >= MAX_STARS;
+          const apex = !!pkm && stars >= MAX_STARS;
           const passive = pkm ? POKEDEX[pkm.definitionId].benchPassive : null;
           return (
             <button
@@ -43,12 +43,12 @@ export function TeamBar({ team, hotSwapCooldowns, teamLevel, onHotSwap }: Props)
               type="button"
               disabled={disabled}
               onClick={() => onHotSwap(i)}
-              title={pkm && passive && stars >= 2 ? `Pasiva: ${describePassive(passive.stat, passive.value * (shiny ? 2 : 1))}` : undefined}
+              title={pkm && passive && stars >= 2 ? `Pasiva: ${describePassive(passive.stat, passive.value * (apex ? 2 : 1))}` : undefined}
               data-testid={`team-slot-${i}`}
               class={`pk-btn relative flex flex-col items-center gap-1 px-1 py-2 text-[9px] ${
                 slot.isActive ? 'pk-btn-active' : ''
               }`}
-              style={shiny ? { borderColor: '#e0a000', boxShadow: '0 4px 0 #e0a000, 0 0 8px #ffd860' } : undefined}
+              style={apex ? { borderColor: '#e0a000', boxShadow: '0 4px 0 #e0a000, 0 0 8px #ffd860' } : undefined}
             >
               <span class="absolute left-1 top-1 text-[9px]">{i + 1}</span>
               {pkm ? (

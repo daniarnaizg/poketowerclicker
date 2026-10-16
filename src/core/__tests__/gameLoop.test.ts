@@ -1,13 +1,18 @@
 import { describe, it, expect } from 'vitest';
 import { tickGame } from '../gameLoop';
 import { generateWave } from '../waveGenerator';
+import { calculateUpgradeCost, purchaseUpgrade } from '../bastionUpgrades';
 import { POKEDEX } from '../../data/pokemon';
 import { TYPE_CHART } from '../damage';
 import { ARENA } from '../../config/arena.config';
 import {
   BOSS_HP_MULTIPLIER,
   BOSS_TIMER_DURATION,
+  ENEMY_CONTACT_DAMAGE,
+  ENEMY_CONTACT_DAMAGE_FLOOR_SCALE,
   HOT_SWAP_COOLDOWN,
+  INTER_WAVE_BREAK_SEC,
+  WALL_HP_PER_LEVEL,
   WAVE_ENEMY_COUNT_BASE,
   enemyHp,
 } from '../../config/balance.config';
@@ -24,6 +29,7 @@ const ZERO_UPGRADES: BastionUpgrades = {
   UP_CRIT: 0,
   UP_CDMG: 0,
   UP_GOLD: 0,
+  UP_WALL: 0,
 };
 
 /** Deterministic PRNG so runs are reproducible across calls. */
@@ -150,13 +156,113 @@ describe('tickGame', () => {
     expect(distAfter).toBeLessThan(distBefore);
   });
 
-  it('advances the floor once a wave is cleared', () => {
+  const ticks = (from: GameState, n: number): GameState => {
+    let state = from;
+    for (let i = 0; i < n; i++) state = tickGame(state, {}, config, 16.7, mulberry32(100 + i));
+    return state;
+  };
+
+  it('advances the floor once a wave is cleared and the breather expires', () => {
     const base = startingRun(21);
     const cleared: GameState = { ...base, enemies: [], waveEnemiesRemaining: 0 };
-    const next = tickGame(cleared, {}, config, 16.7, mulberry32(22));
+    const inBreak = tickGame(cleared, {}, config, 16.7, mulberry32(22));
+    expect(inBreak.floor).toBe(1);
+    expect(inBreak.interWaveTimerSec).toBeCloseTo(INTER_WAVE_BREAK_SEC - 1 / 60, 5);
+    expect(inBreak.enemies).toHaveLength(0);
+
+    const next = ticks(inBreak, 60 * 3);
     expect(next.floor).toBe(2);
+    expect(next.interWaveTimerSec).toBeUndefined();
     expect(next.enemies.length).toBeGreaterThan(0);
     expect(next.waveEnemiesRemaining).toBe(next.enemies.length);
+  });
+
+  it('waits for the player when auto-advance is off', () => {
+    const base = startingRun(21);
+    const cleared: GameState = { ...base, enemies: [], waveEnemiesRemaining: 0, autoAdvanceWave: false };
+    const awaiting = tickGame(cleared, {}, config, 16.7, mulberry32(22));
+    expect(awaiting.awaitingNextWave).toBe(true);
+    expect(awaiting.interWaveTimerSec).toBeUndefined();
+
+    const waited = ticks(awaiting, 60 * 10);
+    expect(waited.floor).toBe(1);
+    expect(waited.enemies).toHaveLength(0);
+
+    const spawned = tickGame(waited, { startNextWave: true }, config, 16.7, mulberry32(23));
+    expect(spawned.floor).toBe(2);
+    expect(spawned.enemies.length).toBeGreaterThan(0);
+  });
+
+  it('startNextWave skips the auto-advance countdown', () => {
+    const base = startingRun(21);
+    const cleared: GameState = { ...base, enemies: [], waveEnemiesRemaining: 0 };
+    const inBreak = tickGame(cleared, {}, config, 16.7, mulberry32(22));
+    expect(inBreak.interWaveTimerSec).toBeGreaterThan(0);
+
+    const spawned = tickGame(inBreak, { startNextWave: true }, config, 16.7, mulberry32(23));
+    expect(spawned.floor).toBe(2);
+    expect(spawned.enemies.length).toBeGreaterThan(0);
+  });
+
+  it('setAutoAdvance flips the auto-advance flag', () => {
+    const base = startingRun(21);
+    expect(tickGame(base, { setAutoAdvance: false }, config, 16.7, mulberry32(22)).autoAdvanceWave).toBe(false);
+    const off: GameState = { ...base, autoAdvanceWave: false };
+    expect(tickGame(off, { setAutoAdvance: true }, config, 16.7, mulberry32(22)).autoAdvanceWave).toBe(true);
+  });
+
+  it('charges the ultimate but does not regenerate during the breather', () => {
+    const base = startingRun(21);
+    // interWaveTimerSec is pre-set: a single tick starts the break in section 6,
+    // which runs after regen, so the pause is only observable across ticks.
+    const inBreak: GameState = {
+      ...base,
+      enemies: [],
+      waveEnemiesRemaining: 0,
+      bastionHp: 50,
+      interWaveTimerSec: 1.5,
+    };
+    const next = tickGame(inBreak, {}, config, 16.7, mulberry32(22));
+    expect(next.ultimateCharge).toBeGreaterThan(0);
+    expect(next.bastionHp).toBe(50);
+  });
+
+  it('scales contact damage with the floor (≈1.4x at floor 41 vs floor 1)', () => {
+    const leakDamage = (floor: number): number => {
+      const base = startingRun(43);
+      const atCenter = { ...base.enemies[0], x: ARENA.CENTER, y: ARENA.CENTER };
+      const doomed: GameState = {
+        ...base,
+        floor,
+        bastionHp: 10_000,
+        bastionMaxHp: 10_000,
+        enemies: [atCenter],
+        waveEnemiesRemaining: 1,
+        // Pause regen (breather) so the contact hit is not healed away within the tick.
+        interWaveTimerSec: 1.5,
+      };
+      return doomed.bastionHp - tickGame(doomed, {}, config, 16.7, mulberry32(44)).bastionHp;
+    };
+    expect(leakDamage(1)).toBeCloseTo(ENEMY_CONTACT_DAMAGE, 5);
+    expect(leakDamage(41)).toBeCloseTo(ENEMY_CONTACT_DAMAGE * (1 + 40 * ENEMY_CONTACT_DAMAGE_FLOOR_SCALE), 5);
+    expect(leakDamage(41)).toBeCloseTo(1.4 * leakDamage(1), 5);
+  });
+
+  it('UP_WALL raises max HP by 10% (rounded) and heals by the same amount', () => {
+    const base = startingRun(81);
+    const wallState: GameState = { ...base, gold: 1000, bastionMaxHp: 130, bastionHp: 50 };
+    const next = purchaseUpgrade(wallState, 'UP_WALL');
+    const gain = Math.round(130 * WALL_HP_PER_LEVEL);
+    expect(next.bastionUpgrades.UP_WALL).toBe(1);
+    expect(next.bastionMaxHp).toBe(130 + gain);
+    expect(next.bastionHp).toBe(50 + gain);
+    expect(next.gold).toBe(1000 - calculateUpgradeCost('UP_WALL', 0));
+  });
+
+  it('UP_WALL is a no-op when gold is insufficient', () => {
+    const base = startingRun(81);
+    const poor: GameState = { ...base, gold: 0, bastionMaxHp: 130, bastionHp: 50 };
+    expect(purchaseUpgrade(poor, 'UP_WALL')).toBe(poor);
   });
 
   it('ends the run when the boss timer expires', () => {

@@ -23,6 +23,12 @@ export const FIXED_TIMESTEP = 1 / 60;
 
 export const HOT_SWAP_COOLDOWN = 4; // seconds
 export const BOSS_TIMER_DURATION = 30; // seconds
+/** Bastion damage taken when an enemy leaks through to the center. */
+export const ENEMY_CONTACT_DAMAGE = 4;
+/** Contact damage grows per floor: ENEMY_CONTACT_DAMAGE x (1 + (floor-1) x this). */
+export const ENEMY_CONTACT_DAMAGE_FLOOR_SCALE = 0.01;
+/** Automatic breather (s) between a cleared wave and the next floor spawn. */
+export const INTER_WAVE_BREAK_SEC = 2.75;
 export const TYPE_MULTIPLIER_SUPER_EFFECTIVE = 1.5;
 export const TYPE_MULTIPLIER_NOT_EFFECTIVE = 0.65;
 export const TYPE_MULTIPLIER_IMMUNE = 0;
@@ -52,9 +58,11 @@ export function teamLevelCost(currentLevel: number): number {
 }
 
 /** Base projectile damage before atk/level scaling. */
-export const PROJECTILE_BASE_DAMAGE = 10;
+export const PROJECTILE_BASE_DAMAGE = 40;
 /** Base click damage before UP_CLICK and atk scaling. */
-export const CLICK_BASE_DAMAGE = 15;
+export const CLICK_BASE_DAMAGE = 60;
+/** Held-click repeat interval (ms): caps hold-to-fire at 4 clicks/s. */
+export const HOLD_FIRE_INTERVAL_MS = 250;
 /** UP_ARROW: +8% projectile damage per level. */
 export const ARROW_DAMAGE_PER_LEVEL = 0.08;
 /** UP_CRIT: +1% crit chance per level. */
@@ -64,10 +72,12 @@ export const CRIT_CHANCE_CAP = 0.9;
 export const SPD_PER_LEVEL = 0.05;
 /** UP_GOLD: +10% gold per level. */
 export const GOLD_PER_LEVEL = 0.10;
-/** UP_HP: +20 max bastion HP per level; passive regen 2%/s (PRD §4.1). */
+/** UP_HP: +20 max bastion HP per level; passive regen 3%/s (PRD §4.1). */
 export const HP_PER_LEVEL = 20;
-export const BASTION_BASE_HP = 100;
-export const BASTION_REGEN_FRACTION_PER_SEC = 0.02;
+/** UP_WALL: +10% max bastion HP per level (with a matching heal). */
+export const WALL_HP_PER_LEVEL = 0.1;
+export const BASTION_BASE_HP = 130;
+export const BASTION_REGEN_FRACTION_PER_SEC = 0.03;
 /** UP_MULTI: extra shots/bounces per level, capped (PRD: 1 to 9). */
 export const MULTI_MAX = 9;
 
@@ -89,6 +99,7 @@ const UPGRADE_BASE_COST: Record<BastionUpgradeId, number> = {
   UP_CRIT: 40,
   UP_CDMG: 45,
   UP_GOLD: 50,
+  UP_WALL: 60,
 };
 
 export function upgradeCost(id: BastionUpgradeId, currentLevel: number): number {
@@ -112,12 +123,9 @@ export function enemySpeed(floor: number): number {
 
 // ---------------------------------------------------------------------------
 // Phase 2 — Ultimates (PRD §3.2). Damage/shape per move lives in data/ultimates.ts.
+// Charge is TIME-based: `ultimate.cooldownSec` per species, so there are no
+// per-hit / per-click charge constants.
 // ---------------------------------------------------------------------------
-
-/** Ultimate energy gained per projectile hit that deals damage. */
-export const ULTIMATE_CHARGE_PER_HIT = 1;
-/** Ultimate energy gained per click that hits at least one enemy. */
-export const ULTIMATE_CHARGE_PER_CLICK = 5;
 
 // ---------------------------------------------------------------------------
 // Phase 2 — Switch-In (PRD §3.3) & status effects (PRD §3.1, 3★)
@@ -138,7 +146,7 @@ export const SWITCH_IN_EFFECT_DURATION: Readonly<Record<SwitchInEffect, number>>
 /** Status duration (s) applied by ultimates that carry one. */
 export const ULTIMATE_STATUS_DURATION = 3;
 
-/** Burn DPS = PROJECTILE_BASE_DAMAGE x (atk/50) x levelScale x this. */
+/** Burn DPS = triggering hit damage × this. */
 export const BURN_DPS_FACTOR = 0.6;
 /** Movement multiplier while slowed. Paralysis freezes movement entirely. */
 export const SLOW_SPEED_FACTOR = 0.5;
@@ -181,8 +189,8 @@ export const STAR_BENCH_PASSIVE = 2;
 export const STAR_SWITCH_IN = 3;
 /** 4★: firing pattern evolves (pierce / bigger AoE / +1 bounce). */
 export const STAR_PATTERN = 4;
-/** 5★: Shiny aura + doubled BENCH_PASSIVE. */
-export const STAR_SHINY = 5;
+/** 5★: Aura Apex (golden aura) + doubled BENCH_PASSIVE. Shiny is a separate 3C collectible. */
+export const STAR_AURA_APEX = 5;
 /** BENCH_PASSIVE multiplier at 5★ ("Duplica Pasiva"). */
 export const BENCH_PASSIVE_MAX_STAR_MULTIPLIER = 2;
 /**
@@ -268,6 +276,9 @@ export const BALANCE = Object.freeze({
   FIXED_TIMESTEP,
   HOT_SWAP_COOLDOWN,
   BOSS_TIMER_DURATION,
+  ENEMY_CONTACT_DAMAGE,
+  ENEMY_CONTACT_DAMAGE_FLOOR_SCALE,
+  INTER_WAVE_BREAK_SEC,
   TYPE_MULTIPLIER_SUPER_EFFECTIVE,
   TYPE_MULTIPLIER_NOT_EFFECTIVE,
   TYPE_MULTIPLIER_IMMUNE,
@@ -285,12 +296,11 @@ export const BALANCE = Object.freeze({
   SPD_PER_LEVEL,
   GOLD_PER_LEVEL,
   HP_PER_LEVEL,
+  WALL_HP_PER_LEVEL,
   BASTION_BASE_HP,
   BASTION_REGEN_FRACTION_PER_SEC,
   MULTI_MAX,
   RUNE_DAMAGE_BONUS,
-  ULTIMATE_CHARGE_PER_HIT,
-  ULTIMATE_CHARGE_PER_CLICK,
   SWITCH_IN_RADIUS,
   SWITCH_IN_DAMAGE_MULTIPLIER,
   MAX_STARS,

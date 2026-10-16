@@ -13,7 +13,7 @@ import type {
 } from '../types';
 
 const config: GameConfig = { pokedex: POKEDEX, typeChart: TYPE_CHART, seed: 1 };
-const ZERO: BastionUpgrades = { UP_CLICK: 0, UP_HP: 0, UP_MULTI: 0, UP_ARROW: 0, UP_SPD: 0, UP_CRIT: 0, UP_CDMG: 0, UP_GOLD: 0 };
+const ZERO: BastionUpgrades = { UP_CLICK: 0, UP_HP: 0, UP_MULTI: 0, UP_ARROW: 0, UP_SPD: 0, UP_CRIT: 0, UP_CDMG: 0, UP_GOLD: 0, UP_WALL: 0 };
 
 function mulberry32(seed: number): () => number {
   let a = seed;
@@ -59,7 +59,7 @@ describe('startRun with a loadout', () => {
     expect(s.team[1].pokemon?.definitionId).toBe('0007');
     expect(s.team[1].pokemon?.stars).toBe(3);
     expect(s.team[3].pokemon?.stars).toBe(5);
-    expect(s.ultimateMax).toBe(POKEDEX['0007'].ultimate.energyCost);
+    expect(s.ultimateMax).toBe(POKEDEX['0007'].ultimate.cooldownSec);
     expect(s.effects).toEqual([]);
   });
 
@@ -117,14 +117,16 @@ describe('Switch-In status (3★)', () => {
 
   it('applies nothing below 3★', () => {
     const s = swapTo('0004', 2);
-    expect(s.enemies[0].status).toBeUndefined();
+    expect(s.enemies[0].statuses).toBeUndefined();
     expect(s.bastionShieldSec).toBe(0);
   });
 
   it('Fire burns, Water slows, Electric paralyzes', () => {
-    expect(swapTo('0004', 3).enemies[0].status?.burnSec).toBeCloseTo(SWITCH_IN_EFFECT_DURATION.BURN, 5);
-    expect(swapTo('0007', 3).enemies[0].status?.slowSec).toBeCloseTo(SWITCH_IN_EFFECT_DURATION.SLOW, 5);
-    expect(swapTo('0025', 3).enemies[0].status?.paralyzeSec).toBeCloseTo(SWITCH_IN_EFFECT_DURATION.PARALYZE, 5);
+    const remaining = (id: string, statusId: string) =>
+      swapTo(id, 3).enemies[0].statuses?.find((s) => s.id === statusId)?.remainingSec;
+    expect(remaining('0004', 'BURN')).toBeCloseTo(SWITCH_IN_EFFECT_DURATION.BURN, 5);
+    expect(remaining('0007', 'SLOW')).toBeCloseTo(SWITCH_IN_EFFECT_DURATION.SLOW, 5);
+    expect(remaining('0025', 'PARALYZE')).toBeCloseTo(SWITCH_IN_EFFECT_DURATION.PARALYZE, 5);
   });
 
   it('Normal-type grants a bastion shield even with no enemy nearby', () => {
@@ -134,7 +136,7 @@ describe('Switch-In status (3★)', () => {
 
   it('bosses only suffer a fraction of the duration', () => {
     const s = swapTo('0004', 3, { isBoss: true });
-    expect(s.enemies[0].status?.burnSec).toBeCloseTo(SWITCH_IN_EFFECT_DURATION.BURN * BOSS_STATUS_DURATION_FACTOR, 5);
+    expect(s.enemies[0].statuses?.find((st) => st.id === 'BURN')?.remainingSec).toBeCloseTo(SWITCH_IN_EFFECT_DURATION.BURN * BOSS_STATUS_DURATION_FACTOR, 5);
   });
 });
 
@@ -142,28 +144,28 @@ describe('status ailments in the loop', () => {
   const base = () => start([{ definitionId: '0004', stars: 1 }]);
 
   it('paralysis freezes, slow halves movement', () => {
-    const at = (status: Enemy['status']) => {
-      const s = withEnemies(base(), [{ x: 10, y: 192, speed: 60, status }]);
+    const at = (statuses: Enemy['statuses']) => {
+      const s = withEnemies(base(), [{ x: 10, y: 192, speed: 60, statuses }]);
       const n = tickGame(s, {}, config, 16.7, mulberry32(1));
       return n.enemies[0].x - 10;
     };
     const normal = at(undefined);
-    expect(at({ paralyzeSec: 2 })).toBe(0);
-    expect(at({ slowSec: 2 })).toBeCloseTo(normal * SLOW_SPEED_FACTOR, 5);
+    expect(at([{ id: 'PARALYZE', remainingSec: 2 }])).toBe(0);
+    expect(at([{ id: 'SLOW', remainingSec: 2 }])).toBeCloseTo(normal * SLOW_SPEED_FACTOR, 5);
   });
 
   it('burn deals damage over time, credits the slot and expires', () => {
-    const s = withEnemies(base(), [{ x: 10, y: 192, hp: 1000, maxHp: 1000, status: { burnSec: 1, burnDps: 60, burnSlot: 0 } }]);
+    const s = withEnemies(base(), [{ x: 10, y: 192, hp: 1000, maxHp: 1000, statuses: [{ id: 'BURN', remainingSec: 1, dps: 60, sourceSlot: 0 }] }]);
     let n = s;
     for (let i = 0; i < 30; i++) n = tickGame(n, {}, config, 16.7, mulberry32(i));
     expect(n.enemies[0].hp).toBeLessThan(1000 - 25);
     expect(n.runStats.damagePerSlot[0]).toBeGreaterThan(25);
     for (let i = 0; i < 40; i++) n = tickGame(n, {}, config, 16.7, mulberry32(i));
-    expect(n.enemies[0].status).toBeUndefined();
+    expect(n.enemies[0].statuses).toBeUndefined();
   });
 
   it('a burn kill pays gold and counts the kill', () => {
-    const s = withEnemies(base(), [{ x: 10, y: 192, hp: 0.5, maxHp: 10, goldValue: 9, status: { burnSec: 1, burnDps: 600, burnSlot: 0 } }]);
+    const s = withEnemies(base(), [{ x: 10, y: 192, hp: 0.5, maxHp: 10, goldValue: 9, statuses: [{ id: 'BURN', remainingSec: 1, dps: 600, sourceSlot: 0 }] }]);
     const n = tickGame(s, {}, config, 16.7, mulberry32(1));
     expect(n.runStats.totalKills).toBeGreaterThan(0);
     expect(n.gold).toBeGreaterThanOrEqual(9);
@@ -222,7 +224,8 @@ describe('ultimates', () => {
 
   it('needs a full meter and a living enemy; never wastes charge', () => {
     const s0 = withEnemies(start([{ definitionId: '0004', stars: 1 }]), [{ x: 100, y: 100 }]);
-    expect(tickGame({ ...s0, ultimateCharge: 99 }, { useUltimate: true }, config, 0, mulberry32(1)).ultimateCharge).toBe(99);
+    const almost = s0.ultimateMax - 1;
+    expect(tickGame({ ...s0, ultimateCharge: almost }, { useUltimate: true }, config, 0, mulberry32(1)).ultimateCharge).toBe(almost);
     const empty = fullUlt({ ...s0, enemies: [], waveEnemiesRemaining: 0 });
     expect(tickGame(empty, { useUltimate: true }, config, 0, mulberry32(1)).ultimateCharge).toBe(empty.ultimateMax);
   });
@@ -253,7 +256,7 @@ describe('ultimates', () => {
 
   it('status ultimates (Charmander -> burn) leave survivors burning', () => {
     const n = run('0004', [{ x: 192 + 40, y: 192 }]);
-    expect(n.enemies[0].status?.burnSec).toBeGreaterThan(0);
+    expect(n.enemies[0].statuses?.find((s) => s.id === 'BURN')?.remainingSec).toBeGreaterThan(0);
   });
 
   it('every species can cast its ultimate without throwing', () => {
@@ -263,21 +266,32 @@ describe('ultimates', () => {
     }
   });
 
-  it('charges from hits and clicks, scaled by ULT_CHARGE passives', () => {
-    const s = withEnemies(start([{ definitionId: '0004', stars: 1 }]), [{ x: 100, y: 100 }]);
-    const clicked = tickGame(s, { click: { x: 100, y: 100 } }, config, 0, mulberry32(1));
-    expect(clicked.ultimateCharge).toBe(5);
+  it('charges with time, faster with ULT_CHARGE passives, and never from clicks', () => {
+    const ticks = (s: GameState, n: number): GameState => {
+      let next = s;
+      for (let i = 0; i < n; i++) next = tickGame(next, {}, config, 16.7, mulberry32(i));
+      return next;
+    };
+    const solo = withEnemies(start([{ definitionId: '0004', stars: 1 }]), [{ x: 100, y: 100 }]);
+    // 60 fixed steps = 1 s of run time = 1 s of cooldown.
+    expect(ticks(solo, 60).ultimateCharge).toBeCloseTo(1, 5);
+
+    // Torchic (base form) carries ULT_CHARGE 0.2, halved at 2★: +10% charge rate.
     const boosted = start([{ definitionId: '0004', stars: 1 }, { definitionId: '0255', stars: 2 }, null, null, null, null]);
-    const c2 = tickGame(withEnemies(boosted, [{ x: 100, y: 100 }]), { click: { x: 100, y: 100 } }, config, 0, mulberry32(1));
-    expect(c2.ultimateCharge).toBeCloseTo(5 * (1 + 0.1), 5); // Torchic (base form) ULT_CHARGE 0.2 * 0.5
+    const withPassive = withEnemies(boosted, [{ x: 100, y: 100 }]);
+    expect(ticks(withPassive, 60).ultimateCharge).toBeCloseTo(1.1, 5);
+
+    expect(tickGame(solo, { click: { x: 100, y: 100 } }, config, 0, mulberry32(1)).ultimateCharge).toBe(0);
   });
 
   it('keeps the meter fill ratio when swapping Pokémon', () => {
     const s0 = start([{ definitionId: '0004', stars: 1 }, { definitionId: '0150', stars: 1 }, null, null, null, null]);
+    const benchMax = s0.team[1].pokemon!.ultimateMax;
+    expect(s0.ultimateMax).not.toBe(benchMax);
     const half = { ...s0, ultimateCharge: s0.ultimateMax / 2 };
     const n = tickGame(half, { hotSwapIndex: 1 }, config, 0, mulberry32(1));
-    expect(n.ultimateMax).toBe(150);
-    expect(n.ultimateCharge).toBeCloseTo(75, 5);
+    expect(n.ultimateMax).toBe(benchMax);
+    expect(n.ultimateCharge).toBeCloseTo(benchMax / 2, 5);
   });
 });
 

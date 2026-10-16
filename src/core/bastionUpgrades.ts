@@ -15,6 +15,7 @@ import {
   HP_PER_LEVEL,
   MULTI_MAX,
   SPD_PER_LEVEL,
+  WALL_HP_PER_LEVEL,
   upgradeCost,
 } from '../config/balance.config';
 
@@ -67,6 +68,10 @@ export function purchaseUpgrade(state: GameState, upgradeId: BastionUpgradeId): 
   if (upgradeId === 'UP_HP') {
     bastionMaxHp += HP_PER_LEVEL;
     bastionHp = Math.min(bastionMaxHp, bastionHp + HP_PER_LEVEL);
+  } else if (upgradeId === 'UP_WALL') {
+    const gain = Math.round(bastionMaxHp * WALL_HP_PER_LEVEL);
+    bastionMaxHp += gain;
+    bastionHp = Math.min(bastionMaxHp, bastionHp + gain);
   }
 
   return { ...state, gold: state.gold - cost, bastionUpgrades, bastionMaxHp, bastionHp };

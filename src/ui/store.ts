@@ -33,6 +33,10 @@ interface GameStore {
   requestClickAttack: (x: number, y: number) => void;
   purchaseUpgrade: (upgradeId: BastionUpgradeId) => void;
   requestTeamLevelUp: () => void;
+  /** Spawn the next floor now, skipping the inter-wave breather. */
+  requestStartNextWave: () => void;
+  /** Turn the automatic inter-wave advance on or off. */
+  requestSetAutoAdvance: (on: boolean) => void;
   /** Start a run from the 6-slot loadout chosen in the Caja (MENU phase). */
   requestStartRun: (loadout: (LoadoutEntry | null)[]) => void;
   consumeInput: () => GameInput;
@@ -69,6 +73,8 @@ export const useGameStore = create<GameStore>((set, get) => {
     requestClickAttack: (x, y) => queue({ click: { x, y } }),
     purchaseUpgrade: (upgradeId) => queue({ buyUpgrade: upgradeId }),
     requestTeamLevelUp: () => queue({ buyTeamLevel: true }),
+    requestStartNextWave: () => queue({ startNextWave: true }),
+    requestSetAutoAdvance: (on) => queue({ setAutoAdvance: on }),
     requestStartRun: (loadout) => queue({ startRun: loadout }),
 
     consumeInput: () => {

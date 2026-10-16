@@ -9,7 +9,7 @@
  */
 
 import { del, get, set } from 'idb-keyval';
-import { createMeta, sanitizeMeta } from '../core/meta';
+import { createMeta, migrateMeta } from '../core/meta';
 import type { MetaState } from '../core/meta';
 
 export const SAVE_KEY = 'pokebastion:save:v1';
@@ -31,13 +31,13 @@ export async function loadMeta(): Promise<MetaState> {
   if (hasIndexedDb()) {
     try {
       const raw = await get(SAVE_KEY);
-      if (raw !== undefined) return sanitizeMeta(raw);
+      if (raw !== undefined) return migrateMeta(raw);
     } catch (err) {
       console.warn('[save] IndexedDB read failed, trying localStorage', err);
     }
   }
   const local = readLocal();
-  return local === undefined ? createMeta() : sanitizeMeta(local);
+  return local === undefined ? createMeta() : migrateMeta(local);
 }
 
 export async function saveMeta(meta: MetaState): Promise<void> {

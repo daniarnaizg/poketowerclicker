@@ -12,7 +12,7 @@
  *   ATTACK_SPEED    extra shots per second (fraction)
  *   GOLD            extra gold per kill (additive with UP_GOLD)
  *   CLICK_DAMAGE    extra click damage
- *   ULT_CHARGE      extra ultimate energy per hit / click
+ *   ULT_CHARGE      extra ultimate charge rate (fraction)
  *   BASTION_REGEN   extra passive regen, as a fraction of max HP per second
  *
  * Unknown stat keys are ignored (forward-compatible with future species data).

@@ -20,7 +20,7 @@ import { tickGame } from './core/gameLoop';
 import { TYPE_CHART } from './core/damage';
 import { POKEDEX } from './data/pokemon';
 import { ARENA } from './config/arena.config';
-import { BASTION_BASE_HP, FIXED_TIMESTEP } from './config/balance.config';
+import { BASTION_BASE_HP, FIXED_TIMESTEP, HOLD_FIRE_INTERVAL_MS } from './config/balance.config';
 import type {
   BastionUpgrades as BastionUpgradeLevels,
   Cooldowns6,
@@ -59,6 +59,7 @@ const ZERO_UPGRADES: BastionUpgradeLevels = {
   UP_CRIT: 0,
   UP_CDMG: 0,
   UP_GOLD: 0,
+  UP_WALL: 0,
 };
 
 function emptySlot(index: number): TeamSlot {
@@ -136,6 +137,42 @@ export default function App() {
     const store = useGameStore.getState();
     store.setGameState(stateRef.current);
 
+    // Click attack (mouse + touch): `pointerdown` fires once, then the frame
+    // loop repeats it every HOLD_FIRE_INTERVAL_MS (hold-to-fire cap). Pointer
+    // capture keeps the release even when it happens outside the canvas.
+    const hold = { active: false, x: 0, y: 0, lastFire: 0 };
+    const toArena = (e: PointerEvent): { x: number; y: number } | null => {
+      const rect = canvas.getBoundingClientRect();
+      if (rect.width === 0 || rect.height === 0) return null;
+      return {
+        x: (e.clientX - rect.left) * (ARENA.SIZE / rect.width),
+        y: (e.clientY - rect.top) * (ARENA.SIZE / rect.height),
+      };
+    };
+    const onPointerDown = (e: PointerEvent): void => {
+      if (e.button !== 0) return;
+      const point = toArena(e);
+      if (!point) return;
+      hold.active = true;
+      hold.x = point.x;
+      hold.y = point.y;
+      hold.lastFire = performance.now();
+      canvas.setPointerCapture(e.pointerId);
+      store.requestClickAttack(hold.x, hold.y);
+    };
+    const onPointerEnd = (): void => {
+      hold.active = false;
+    };
+    // Right click = ultimate (PRD §3.3 "clic secundario"); never opens the browser menu.
+    const onContextMenu = (e: MouseEvent): void => {
+      e.preventDefault();
+      store.requestUltimate();
+    };
+    canvas.addEventListener('pointerdown', onPointerDown);
+    canvas.addEventListener('pointerup', onPointerEnd);
+    canvas.addEventListener('pointercancel', onPointerEnd);
+    canvas.addEventListener('contextmenu', onContextMenu);
+
     let raf = 0;
     let last = performance.now();
     // Acumulador: tickGame descarta el resto de delta/paso fijo, así que en monitores
@@ -147,6 +184,10 @@ export default function App() {
       last = now;
       const steps = Math.floor((acc + 0.001) / STEP_MS);
       acc -= steps * STEP_MS;
+      if (hold.active && now - hold.lastFire >= HOLD_FIRE_INTERVAL_MS) {
+        hold.lastFire = now;
+        store.requestClickAttack(hold.x, hold.y);
+      }
       const input = store.consumeInput();
       const delta = steps > 0 ? steps * STEP_MS + 0.001 : 0;
       const next = tickGame(stateRef.current, input, GAME_CONFIG, delta, rngRef.current);
@@ -159,6 +200,10 @@ export default function App() {
 
     return () => {
       cancelAnimationFrame(raf);
+      canvas.removeEventListener('pointerdown', onPointerDown);
+      canvas.removeEventListener('pointerup', onPointerEnd);
+      canvas.removeEventListener('pointercancel', onPointerEnd);
+      canvas.removeEventListener('contextmenu', onContextMenu);
       renderer.destroy();
     };
   }, []);
@@ -177,33 +222,6 @@ export default function App() {
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, []);
-
-  // Click attack: map the CSS-scaled canvas rect back to 384x384 logical space.
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const onMouseDown = (e: MouseEvent): void => {
-      const rect = canvas.getBoundingClientRect();
-      if (rect.width === 0 || rect.height === 0) return;
-      const x = (e.clientX - rect.left) * (ARENA.SIZE / rect.width);
-      const y = (e.clientY - rect.top) * (ARENA.SIZE / rect.height);
-      useGameStore.getState().requestClickAttack(x, y);
-    };
-    // Right click = ultimate (PRD §3.3 "clic secundario"); never opens the browser menu.
-    const onContextMenu = (e: MouseEvent): void => {
-      e.preventDefault();
-      useGameStore.getState().requestUltimate();
-    };
-    const onPrimaryDown = (e: MouseEvent): void => {
-      if (e.button === 0) onMouseDown(e);
-    };
-    canvas.addEventListener('mousedown', onPrimaryDown);
-    canvas.addEventListener('contextmenu', onContextMenu);
-    return () => {
-      canvas.removeEventListener('mousedown', onPrimaryDown);
-      canvas.removeEventListener('contextmenu', onContextMenu);
-    };
   }, []);
 
   /** First launch: the starter joins the collection, then the player enters the Hub. */
@@ -238,7 +256,14 @@ export default function App() {
       <div class="flex w-full flex-col gap-4 p-4 lg:h-full lg:w-[26rem] lg:overflow-hidden lg:p-6">
         {gameState && (
           <>
-            <GameHUD gameState={gameState} onUltimate={() => useGameStore.getState().requestUltimate()} />
+            <GameHUD
+              gameState={gameState}
+              onUltimate={() => useGameStore.getState().requestUltimate()}
+              onToggleAutoAdvance={() =>
+                useGameStore.getState().requestSetAutoAdvance(gameState.autoAdvanceWave === false)
+              }
+              onStartNextWave={() => useGameStore.getState().requestStartNextWave()}
+            />
             <TeamBar
               team={gameState.team}
               hotSwapCooldowns={gameState.hotSwapCooldowns}

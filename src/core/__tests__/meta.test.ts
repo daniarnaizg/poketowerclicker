@@ -26,7 +26,7 @@ describe('chooseStarter', () => {
   it('grants the starter at 1★ in slot 1 plus the welcome seals', () => {
     const m = started();
     expect(m.starterChosen).toBe(true);
-    expect(m.collection['0004']).toEqual({ stars: 1, fragments: 0 });
+    expect(m.collection['0004']).toEqual({ stars: 1, fragments: 0, shinyOwned: false, shinyActive: false });
     expect(m.loadout[0]).toBe('0004');
     expect(m.seals).toBe(STARTING_SEALS);
   });
@@ -77,7 +77,7 @@ describe('pullGacha', () => {
 describe('awakening', () => {
   const withFragments = (n: number): MetaState => {
     const m = started();
-    return { ...m, collection: { ...m.collection, '0004': { stars: 1, fragments: n } } };
+    return { ...m, collection: { ...m.collection, '0004': { stars: 1, fragments: n, shinyOwned: false, shinyActive: false } } };
   };
 
   it('needs the exact fragment cost and consumes it', () => {
@@ -85,12 +85,12 @@ describe('awakening', () => {
     expect(canAwaken(withFragments(cost - 1), '0004')).toBe(false);
     expect(awaken(withFragments(cost - 1), '0004').collection['0004'].stars).toBe(1);
     const up = awaken(withFragments(cost + 1), '0004');
-    expect(up.collection['0004']).toEqual({ stars: 2, fragments: 1 });
+    expect(up.collection['0004']).toEqual({ stars: 2, fragments: 1, shinyOwned: false, shinyActive: false });
   });
 
   it('caps at 5★ and reports no further cost', () => {
     const m = started();
-    const maxed = { ...m, collection: { '0004': { stars: 5, fragments: 999 } } };
+    const maxed = { ...m, collection: { '0004': { stars: 5, fragments: 999, shinyOwned: false, shinyActive: false } } };
     expect(nextAwakenCost(maxed, '0004')).toBeNull();
     expect(awaken(maxed, '0004')).toBe(maxed);
   });
@@ -107,7 +107,7 @@ describe('awakening', () => {
 describe('loadout', () => {
   const two = (): MetaState => {
     const m = started();
-    return { ...m, collection: { ...m.collection, '0007': { stars: 3, fragments: 0 } } };
+    return { ...m, collection: { ...m.collection, '0007': { stars: 3, fragments: 0, shinyOwned: false, shinyActive: false } } };
   };
 
   it('places an owned species and refuses unowned ones', () => {
@@ -124,7 +124,7 @@ describe('loadout', () => {
 
   it('clears a slot and exports entries with current stars', () => {
     let m = setLoadoutSlot(two(), 1, '0007');
-    expect(loadoutToEntries(m)[1]).toEqual({ definitionId: '0007', stars: 3 });
+    expect(loadoutToEntries(m)[1]).toEqual({ definitionId: '0007', stars: 3, shinyActive: false });
     m = setLoadoutSlot(m, 1, null);
     expect(loadoutToEntries(m)[1]).toBeNull();
   });
@@ -169,15 +169,15 @@ describe('sanitizeMeta', () => {
   it('survives garbage, wrong versions and hostile values', () => {
     expect(sanitizeMeta(null)).toEqual(createMeta());
     expect(sanitizeMeta('x')).toEqual(createMeta());
-    expect(sanitizeMeta({ version: 99 })).toEqual(createMeta());
+    expect(sanitizeMeta({ schemaVersion: 99 })).toEqual(createMeta());
     const m = sanitizeMeta({
-      version: 1, starterChosen: true, seals: -5,
+      schemaVersion: 2, starterChosen: true, seals: -5,
       collection: { '0004': { stars: 99, fragments: -1 }, '9999': { stars: 1, fragments: 0 } },
       loadout: ['0004', '0004', '9999', null, 5, undefined],
       clearedBossFloors: [20, 10, 10, -3, 'x'],
     });
     expect(m.seals).toBe(0);
-    expect(m.collection['0004']).toEqual({ stars: 5, fragments: 0 });
+    expect(m.collection['0004']).toEqual({ stars: 5, fragments: 0, shinyOwned: false, shinyActive: false });
     expect(m.collection['9999']).toBeUndefined();
     expect(m.loadout).toEqual(['0004', null, null, null, null, null]);
     expect(m.clearedBossFloors).toEqual([10, 20]);

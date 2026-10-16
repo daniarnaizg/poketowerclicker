@@ -7,6 +7,7 @@
 import type { LoadoutEntry, Rarity, RunStats } from './types';
 import { INITIAL_PITY, pullOnce } from './gacha';
 import type { PityState } from './gacha';
+import { getEvolutionChain } from './evolution';
 import {
   AWAKEN_FRAGMENT_COST,
   BIG_BOSS_FLOORS,
@@ -23,17 +24,21 @@ import {
 import { ALL_POOL_IDS } from '../data/gachaPools';
 
 export const TEAM_SIZE = 6;
-export const META_VERSION = 1;
+export const META_VERSION = 2;
 
 export interface CollectionEntry {
   /** Awakening rank 1..MAX_STARS. */
   stars: number;
   /** Fragmentos de Vínculo banked toward the next rank. */
   fragments: number;
+  /** Shiny collectible owned (Phase 3C); always false in Phase 2, dead-data prep per handoff §2.2. */
+  shinyOwned: boolean;
+  /** Shiny currently equipped (Phase 3C); always false in Phase 2, dead-data prep per handoff §2.2. */
+  shinyActive: boolean;
 }
 
 export interface MetaState {
-  version: typeof META_VERSION;
+  schemaVersion: typeof META_VERSION;
   starterChosen: boolean;
   /** Sellos de Reclutamiento (gacha currency). */
   seals: number;
@@ -51,7 +56,7 @@ export interface MetaState {
 
 export function createMeta(): MetaState {
   return {
-    version: META_VERSION,
+    schemaVersion: META_VERSION,
     starterChosen: false,
     seals: 0,
     collection: {},
@@ -77,7 +82,7 @@ export function chooseStarter(meta: MetaState, starterId: string): MetaState {
     ...meta,
     starterChosen: true,
     seals: meta.seals + STARTING_SEALS,
-    collection: { ...meta.collection, [starterId]: { stars: 1, fragments: 0 } },
+    collection: { ...meta.collection, [starterId]: { stars: 1, fragments: 0, shinyOwned: false, shinyActive: false } },
     loadout,
   };
 }
@@ -128,7 +133,7 @@ export function pullGacha(meta: MetaState, count: number, rng: () => number): Pu
       collection[res.speciesId] = { ...owned, fragments: owned.fragments + gain };
       outcomes.push({ speciesId: res.speciesId, rarity: res.rarity, isNew: false, fragmentsGained: gain, guaranteedBy: res.guaranteedBy });
     } else {
-      collection[res.speciesId] = { stars: 1, fragments: 0 };
+      collection[res.speciesId] = { stars: 1, fragments: 0, shinyOwned: false, shinyActive: false };
       const slot = loadout.indexOf(null);
       if (slot >= 0) loadout[slot] = res.speciesId;
       outcomes.push({
@@ -173,7 +178,7 @@ export function awaken(meta: MetaState, speciesId: string): MetaState {
     ...meta,
     collection: {
       ...meta.collection,
-      [speciesId]: { stars: entry.stars + 1, fragments: entry.fragments - cost },
+      [speciesId]: { ...entry, stars: entry.stars + 1, fragments: entry.fragments - cost },
     },
   };
 }
@@ -195,6 +200,14 @@ export function setLoadoutSlot(meta: MetaState, slot: number, speciesId: string 
     loadout[slot] = null;
     return { ...meta, loadout };
   }
+  // handoff §2.6: Sinergias (3B) assume one Pokémon per evolutionary line.
+  const chain = getEvolutionChain(speciesId);
+  for (let i = 0; i < TEAM_SIZE; i++) {
+    if (i === slot) continue;
+    const other = loadout[i];
+    if (!other || other === speciesId) continue;
+    if (chain.includes(other) || getEvolutionChain(other).includes(speciesId)) return meta;
+  }
   const from = loadout.indexOf(speciesId);
   const displaced = loadout[slot];
   loadout[slot] = speciesId;
@@ -211,7 +224,7 @@ export function loadoutToEntries(meta: MetaState): (LoadoutEntry | null)[] {
   return meta.loadout.map((id) => {
     if (!id) return null;
     const entry = meta.collection[id];
-    return entry ? { definitionId: id, stars: entry.stars } : null;
+    return entry ? { definitionId: id, stars: entry.stars, shinyActive: entry.shinyActive } : null;
   });
 }
 
@@ -280,7 +293,7 @@ export function sanitizeMeta(raw: unknown): MetaState {
   const fresh = createMeta();
   if (!raw || typeof raw !== 'object') return fresh;
   const r = raw as Record<string, unknown>;
-  if (r.version !== META_VERSION) return fresh;
+  if (r.schemaVersion !== META_VERSION) return fresh;
 
   const known = new Set(ALL_POOL_IDS);
   const collection: Record<string, CollectionEntry> = {};
@@ -290,7 +303,7 @@ export function sanitizeMeta(raw: unknown): MetaState {
       const e = v as Record<string, unknown>;
       const stars = isCount(e.stars) ? Math.max(1, Math.min(MAX_STARS, Math.floor(e.stars))) : 1;
       const fragments = isCount(e.fragments) ? Math.floor(e.fragments) : 0;
-      collection[id] = { stars, fragments };
+      collection[id] = { stars, fragments, shinyOwned: e.shinyOwned === true, shinyActive: e.shinyActive === true };
     }
   }
 
@@ -312,7 +325,7 @@ export function sanitizeMeta(raw: unknown): MetaState {
     : [];
 
   return {
-    version: META_VERSION,
+    schemaVersion: META_VERSION,
     starterChosen: r.starterChosen === true && Object.keys(collection).length > 0,
     seals: isCount(r.seals) ? Math.floor(r.seals) : 0,
     collection,
@@ -326,4 +339,26 @@ export function sanitizeMeta(raw: unknown): MetaState {
     bestFloor: isCount(r.bestFloor) ? Math.floor(r.bestFloor) : 0,
     totalRuns: isCount(r.totalRuns) ? Math.floor(r.totalRuns) : 0,
   };
+}
+
+/**
+ * Upgrade an untrusted persisted save to the current schema, then sanitize it.
+ * PURE + deterministic: no Date / Math.random. v1 (`version: 1`) is the only
+ * shipped shape; v2 already carries `schemaVersion`.
+ */
+export function migrateMeta(raw: unknown): MetaState {
+  if (!raw || typeof raw !== 'object') return createMeta();
+  const r = raw as Record<string, unknown>;
+  if (r.schemaVersion === META_VERSION) return sanitizeMeta(r);
+  if (r.version !== 1) return createMeta();
+
+  const collection: Record<string, unknown> = {};
+  if (r.collection && typeof r.collection === 'object') {
+    for (const [id, v] of Object.entries(r.collection as Record<string, unknown>)) {
+      if (!v || typeof v !== 'object') continue;
+      collection[id] = { ...(v as Record<string, unknown>), shinyOwned: false, shinyActive: false };
+    }
+  }
+  const { version: _v1, ...rest } = r;
+  return sanitizeMeta({ ...rest, schemaVersion: META_VERSION, collection });
 }

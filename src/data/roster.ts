@@ -45,13 +45,17 @@ interface Line {
   /** Canonical Team Level of each evolution step (length = stages - 1). */
   evoLevels: number[];
   stages: Stage[];
-  /** Ultimate energy cost; legendaries need more. */
-  energy?: number;
+  /** Ultimate cooldown override (s); by default STAGE_COOLDOWNS[index] applies. */
+  cooldown?: number;
   /** Base crit chance of the first stage (+1% per later stage). */
   crit?: number;
 }
 
 const round = (v: number, d: number): number => Math.round(v * 10 ** d) / 10 ** d;
+
+/** Ultimate cooldown (s) per evolution stage; single-stage species recharge at 26 s. */
+const STAGE_COOLDOWNS = [30, 26, 22];
+const SINGLE_STAGE_COOLDOWN = 26;
 
 function defineLine(line: Line): PokemonDefinition[] {
   const n = line.stages.length;
@@ -73,7 +77,11 @@ function defineLine(line: Line): PokemonDefinition[] {
       },
       pattern: st.pattern ?? line.pattern,
       evolution: i < n - 1 ? { targetId: line.stages[i + 1].id, canonicalLevel: line.evoLevels[i] } : undefined,
-      ultimate: { id: ultId, name: ult.name, energyCost: line.energy ?? 100 },
+      ultimate: {
+        id: ultId,
+        name: ult.name,
+        cooldownSec: line.cooldown ?? (n === 1 ? SINGLE_STAGE_COOLDOWN : STAGE_COOLDOWNS[i] ?? 26),
+      },
       benchPassive: { stat: line.passive[0], value: round(line.passive[1] * ratio, 3) },
     };
   });
@@ -249,19 +257,19 @@ const LINES: Line[] = [
 
   // ======================= LEGENDARY (★★★★) =======================
   {
-    gen: 1, pattern: P.SNIPER, ult: 'blizzard', passive: ['ICE_DAMAGE', 0.24], evoLevels: [], energy: 150, crit: 0.08,
+    gen: 1, pattern: P.SNIPER, ult: 'blizzard', passive: ['ICE_DAMAGE', 0.24], evoLevels: [], crit: 0.08,
     stages: [{ id: '0144', name: 'Articuno', types: [T.Ice, T.Flying], atk: 40, spd: 1.0 }],
   },
   {
-    gen: 1, pattern: P.CHAIN, ult: 'thunder', passive: ['ELECTRIC_DAMAGE', 0.24], evoLevels: [], energy: 150, crit: 0.08,
+    gen: 1, pattern: P.CHAIN, ult: 'thunder', passive: ['ELECTRIC_DAMAGE', 0.24], evoLevels: [], crit: 0.08,
     stages: [{ id: '0145', name: 'Zapdos', types: [T.Electric, T.Flying], atk: 42, spd: 1.2 }],
   },
   {
-    gen: 1, pattern: P.AOE, ult: 'fire_blast', passive: ['FIRE_DAMAGE', 0.24], evoLevels: [], energy: 150, crit: 0.08,
+    gen: 1, pattern: P.AOE, ult: 'fire_blast', passive: ['FIRE_DAMAGE', 0.24], evoLevels: [], crit: 0.08,
     stages: [{ id: '0146', name: 'Moltres', types: [T.Fire, T.Flying], atk: 44, spd: 1.0 }],
   },
   {
-    gen: 1, pattern: P.SNIPER, ult: 'psystrike', passive: ['ALL_DAMAGE', 0.15], evoLevels: [], energy: 150, crit: 0.1,
+    gen: 1, pattern: P.SNIPER, ult: 'psystrike', passive: ['ALL_DAMAGE', 0.15], evoLevels: [], crit: 0.1,
     stages: [{ id: '0150', name: 'Mewtwo', types: [T.Psychic], atk: 48, spd: 1.1 }],
   },
 ];

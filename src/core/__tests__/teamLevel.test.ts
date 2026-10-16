@@ -18,6 +18,7 @@ const ZERO_UPGRADES = {
   UP_CRIT: 0,
   UP_CDMG: 0,
   UP_GOLD: 0,
+  UP_WALL: 0,
 } as const;
 
 function makePokemon(defId: string, evolutionStage: number): PlayerPokemon {
@@ -37,7 +38,7 @@ function makePokemon(defId: string, evolutionStage: number): PlayerPokemon {
     critDmg: def.baseStats.critDmg,
     pattern: def.pattern,
     ultimateEnergy: 0,
-    ultimateMax: def.ultimate.energyCost,
+    ultimateMax: def.ultimate.cooldownSec,
     evolutionStage,
   };
 }
@@ -129,6 +130,22 @@ describe('upgradeTeamLevel', () => {
     expect(pokemon?.definitionId).toBe('0006');
     expect(pokemon?.evolutionStage).toBe(2);
     expect(pokemon?.types).toEqual([POKEDEX['0006'].types[0], POKEDEX['0006'].types[1]]);
+  });
+
+  it('clamps the ultimate charge to the evolved form cooldown', () => {
+    const state = makeState(15, 100_000, '0004', 0);
+    const full: GameState = {
+      ...state,
+      team: state.team.map((slot, i) =>
+        i === 0
+          ? { ...slot, pokemon: { ...slot.pokemon!, ultimateEnergy: POKEDEX['0004'].ultimate.cooldownSec } }
+          : slot,
+      ) as Team6,
+    };
+    const pokemon = upgradeTeamLevel(full).team[0].pokemon;
+    expect(pokemon?.definitionId).toBe('0005');
+    expect(pokemon?.ultimateMax).toBe(POKEDEX['0005'].ultimate.cooldownSec);
+    expect(pokemon?.ultimateEnergy).toBe(POKEDEX['0005'].ultimate.cooldownSec);
   });
 
   it('does not evolve a starter past its current stage', () => {

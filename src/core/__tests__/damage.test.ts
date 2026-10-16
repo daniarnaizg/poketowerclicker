@@ -14,6 +14,7 @@ const NO_UPGRADES: BastionUpgrades = {
   UP_CRIT: 0,
   UP_CDMG: 0,
   UP_GOLD: 0,
+  UP_WALL: 0,
 };
 
 const neverCrit = () => 0.999;

@@ -44,7 +44,8 @@ function evolveSlot(slot: TeamSlot, teamLevel: number): TeamSlot {
     critRate: def.baseStats.critRate,
     critDmg: def.baseStats.critDmg,
     pattern: def.pattern,
-    ultimateMax: def.ultimate.energyCost,
+    ultimateEnergy: Math.min(pokemon.ultimateEnergy, def.ultimate.cooldownSec),
+    ultimateMax: def.ultimate.cooldownSec,
     evolutionStage: pokemon.evolutionStage + 1,
   };
   return { ...slot, pokemon: evolved };
