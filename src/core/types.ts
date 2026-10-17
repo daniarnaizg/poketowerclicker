@@ -46,6 +46,8 @@ export enum AttackPattern {
 // ---------------------------------------------------------------------------
 
 export interface BaseStats {
+  /** Canonical base HP (PokeAPI), used to derive species maxHp. */
+  hp: number;
   /** Attack multiplier for auto-shot and click damage. */
   atk: number;
   /** Base attack cadence, shots per second. */
@@ -235,6 +237,14 @@ export interface TeamSlot {
   hotSwapCooldownSec: number;
 }
 
+export interface FaintEntry {
+  slot: number;
+  definitionId: string;
+  floor: number;
+  cause: 'leak' | 'boss';
+  killerType?: PokemonType;
+}
+
 export interface RunStats {
   totalKills: number;
   totalGoldEarned: number;
@@ -249,7 +259,7 @@ export interface RunStats {
   floorReached: number;
   durationSec: number;
   /** Set on game over: how the run ended. */
-  defeatCause?: 'bastionDestroyed' | 'bossTimerExpired';
+  defeatCause?: 'teamWiped' | 'bossTimerExpired';
   /** First type of the enemy that destroyed the bastion, when known. */
   defeatEnemyType?: PokemonType;
   /** Phase 3A (I2): boss floors where the boss was actually killed (hp <= 0). */
@@ -258,18 +268,18 @@ export interface RunStats {
   manualClicks?: number;
   /** Phase 3A (§6.3): automatic clicks fired by UP_AUTOCLICK. */
   autoClicks?: number;
+  /** Phase 3A.2-V: log of Pokémon fainting events during the run. */
+  faintLog?: FaintEntry[];
 }
 
 export type BastionUpgradeId =
-  | 'UP_HP'
-  | 'UP_MULTI'
   | 'UP_ARROW'
   | 'UP_SPD'
+  | 'UP_MULTI'
+  | 'UP_AUTOCLICK'
   | 'UP_CRIT'
   | 'UP_CDMG'
-  | 'UP_GOLD'
-  | 'UP_WALL'
-  | 'UP_AUTOCLICK';
+  | 'UP_GOLD';
 
 export const BASTION_UPGRADE_IDS: readonly BastionUpgradeId[] = [
   'UP_ARROW',
@@ -278,8 +288,6 @@ export const BASTION_UPGRADE_IDS: readonly BastionUpgradeId[] = [
   'UP_AUTOCLICK',
   'UP_CRIT',
   'UP_CDMG',
-  'UP_HP',
-  'UP_WALL',
   'UP_GOLD',
 ] as const;
 
@@ -307,8 +315,6 @@ export interface GameState {
   /** Unified Team Level shared by all 6 Pokémon (PRD §4.1). */
   teamLevel: number;
   gold: number;
-  bastionHp: number;
-  bastionMaxHp: number;
   bastionUpgrades: BastionUpgrades;
   enemies: Enemy[];
   projectiles: Projectile[];
@@ -334,6 +340,29 @@ export interface GameState {
   bastionShieldSec?: number;
   /** Short-lived visual cues (ultimates, switch-in rings) consumed by the renderer. */
   effects?: VisualEffect[];
+  /** Short-lived attack records (enemies hitting the bastion) consumed by the renderer. */
+  strikes?: EnemyStrike[];
+}
+
+/**
+ * Purely cosmetic "hit" record: an enemy reached the bastion and attacked.
+ * Normal enemies die in the same tick (gameplay is unchanged), so this lets the
+ * renderer keep playing their Attack animation for a moment; bosses create one per
+ * periodic strike. The core ages and expires it like floating text.
+ */
+export interface EnemyStrike {
+  id: number;
+  /** Id of the enemy that struck (the boss stays alive; normal enemies are already dead). */
+  enemyId: number;
+  /** Where the attacker stood when it struck (arena logical px). */
+  x: number;
+  y: number;
+  /** Sprite lookup data (the enemy itself may no longer be in `enemies`). */
+  definitionId: string;
+  types: [PokemonType] | [PokemonType, PokemonType];
+  isBoss: boolean;
+  age: number;
+  maxAge: number;
 }
 
 /** Purely cosmetic effect; the core ages and expires it like floating text. */

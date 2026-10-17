@@ -618,3 +618,42 @@ export function groundTones(groundA: string, groundB: string): { base: string; p
     light: mix(groundA, '#ffffff', 0.16),
   };
 }
+
+// ---------------------------------------------------------------------------
+// Plataforma central del Bastión (emblema de Poké Ball)
+// ---------------------------------------------------------------------------
+
+export function buildPlatformSprite(radius = 48): PixelBuffer {
+  const d = radius * 2 + 2;
+  const b = new PixelBuffer(d, d);
+  const c = d / 2;
+  const R = radius;
+  for (let y = 0; y < d; y++) {
+    for (let x = 0; x < d; x++) {
+      const dx = x + 0.5 - c;
+      const dy = y + 0.5 - c;
+      const r = Math.hypot(dx, dy);
+      if (r > R) continue;
+      const ang = Math.atan2(dy, dx);
+      // Anillo exterior discontinuo (14 tramos).
+      if (r > R - 2.2) {
+        const seg = Math.floor(((ang + Math.PI) / (Math.PI * 2)) * 28) % 2 === 0;
+        b.set(x, y, seg ? 'rgba(255,255,255,0.62)' : 'rgba(255,255,255,0.14)');
+        continue;
+      }
+      // Banda central de la Poké Ball.
+      if (Math.abs(dy) < 3 && r > 15) { b.set(x, y, 'rgba(32,32,40,0.30)'); continue; }
+      // Botón central.
+      if (r < 15) {
+        if (r > 12) b.set(x, y, 'rgba(32,32,40,0.30)');
+        else if (r > 8.5) b.set(x, y, 'rgba(255,255,255,0.20)');
+        else b.set(x, y, 'rgba(255,255,255,0.10)');
+        continue;
+      }
+      // Mitades: arriba casi transparente, abajo más clara (sutil para no estorbar a los sprites).
+      b.set(x, y, dy < 0 ? 'rgba(255,255,255,0.07)' : 'rgba(255,255,255,0.20)');
+    }
+  }
+  return b;
+}
+

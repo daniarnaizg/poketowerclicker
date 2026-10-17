@@ -3,10 +3,11 @@
  */
 
 import { runePayout } from '../../config/balance.config';
-import { POKEDEX } from '../../data/pokemon';
-import { portraitUrl } from '../pokeAssets';
+import { POKEDEX as POKEMON_REGISTRY } from '../../data/pokemon';
+import { portraitUrl, portraitUrl as getPortraitUrl } from '../pokeAssets';
 import type { RunStats, Team6 } from '../../core/types';
 import type { RunRewards } from '../../core/meta';
+import { TypeChip as TypeBadge } from './TypeChip';
 
 interface Props {
   runStats: RunStats;
@@ -20,10 +21,8 @@ interface Props {
 function defeatLabel(runStats: RunStats): string {
   const reason =
     runStats.defeatCause === 'bossTimerExpired'
-      ? 'Tiempo agotado'
-      : runStats.defeatCause === 'bastionDestroyed'
-        ? 'Bastión destruido'
-        : '—';
+      ? 'Tiempo agotado ante el Boss'
+      : 'Equipo debilitado';
   return runStats.defeatEnemyType ? `${reason} (${runStats.defeatEnemyType})` : reason;
 }
 
@@ -47,7 +46,7 @@ export function GameOverModal({ runStats, team, rewards, onRestart }: Props) {
   const runes = runePayout(runStats.floorReached);
   const mvpPokemon = runStats.mvpSlotIndex >= 0 ? team[runStats.mvpSlotIndex]?.pokemon : null;
   const mvp = mvpPokemon
-    ? (POKEDEX[mvpPokemon.definitionId]?.name ?? `Slot ${runStats.mvpSlotIndex + 1}`)
+    ? (POKEMON_REGISTRY[mvpPokemon.definitionId]?.name ?? `Slot ${runStats.mvpSlotIndex + 1}`)
     : '—';
   const cause = defeatLabel(runStats);
   return (
@@ -79,6 +78,41 @@ export function GameOverModal({ runStats, team, rewards, onRestart }: Props) {
             </div>
           </div>
         </dl>
+        {(runStats.faintLog?.length ?? 0) > 0 && (
+          <div class="mt-4 pk-dark p-3 text-left">
+            <h3 class="text-[10px] font-bold text-[#f85888] mb-2 tracking-wider">
+              CEMENTERIO DE LA EXPEDICIÓN ({runStats.faintLog!.length})
+            </h3>
+            <div class="flex flex-col gap-1.5 max-h-36 overflow-y-auto pr-1" style={{ scrollbarWidth: 'thin' }}>
+              {runStats.faintLog!.map((entry, idx) => {
+                const name = POKEMON_REGISTRY[entry.definitionId]?.name ?? entry.definitionId;
+                const causeLabel = entry.cause === 'boss' ? 'Jefe' : 'Fuga';
+                return (
+                  <div
+                    key={idx}
+                    class="flex items-center justify-between gap-2 bg-[#142038]/70 border border-[#2a4268] p-1.5 text-[9px]"
+                  >
+                    <div class="flex items-center gap-2">
+                      <img
+                        class="pk-sprite h-7 w-7 grayscale"
+                        src={getPortraitUrl(entry.definitionId)}
+                        alt=""
+                        width={28}
+                        height={28}
+                      />
+                      <span class="font-bold text-white">{name}</span>
+                      <span class="text-[#a8c0e0]">PISO {entry.floor}</span>
+                    </div>
+                    <div class="flex items-center gap-1.5">
+                      <span class="pk-chip text-[8px] bg-[#2a4268] text-[#e0e0e0]">{causeLabel}</span>
+                      {entry.killerType && <TypeBadge type={entry.killerType} />}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
         <div class="mt-4 text-center text-[11px] leading-loose">
           RUNAS GANADAS
           <div class="pk-num text-4xl text-[#803080]">{runes}</div>

@@ -23,6 +23,14 @@ export function rgbToHex([r, g, b]: Rgb): string {
   return `#${h(r)}${h(g)}${h(b)}`;
 }
 
+/** '#rrggbb' o 'rgba(r,g,b,a)' → [r, g, b, a(0..255)]. */
+export function toRgba(css: string): [number, number, number, number] {
+  const m = /^rgba\((\d+),\s*(\d+),\s*(\d+),\s*([\d.]+)\)$/.exec(css);
+  if (m) return [Number(m[1]), Number(m[2]), Number(m[3]), Math.round(Number(m[4]) * 255)];
+  const [r, g, b] = hexToRgb(css);
+  return [r, g, b, 255];
+}
+
 /** Mezcla lineal de dos colores '#rrggbb' (t=0 → a, t=1 → b). */
 export function mix(a: string, b: string, t: number): string {
   const [ar, ag, ab] = hexToRgb(a);

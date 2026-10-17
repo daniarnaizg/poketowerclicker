@@ -26,7 +26,7 @@ interface AnimInfo {
   rows: number;
   totalMs: number;
 }
-type SpriteSet = Partial<Record<AnimName, AnimInfo>> & { walk: AnimInfo };
+export type SpriteSet = Partial<Record<AnimName, AnimInfo>> & { walk: AnimInfo };
 
 const cache = new Map<string, SpriteSet | 'loading' | 'error'>();
 
@@ -144,7 +144,19 @@ export function dirRow(dx: number, dy: number): number {
   return (((Math.round((90 - deg) / 45) % 8) + 8) % 8);
 }
 
-/** Dibuja el frame actual centrado en (x,y), escalado a `targetH` px lógicos de alto. */
+/** Duración total (ms) de una animación; si el set no la tiene, la de caminar. */
+export function animDurationMs(set: SpriteSet, anim: AnimName): number {
+  return (set[anim] ?? set.walk).totalMs;
+}
+
+/**
+ * Dibuja el frame actual centrado en (x,y).
+ *
+ * La escala se calcula con el frame de `baseAnim` (por defecto la propia animación):
+ * `targetH` es el alto en px lógicos de ESE frame. Así, animaciones cuyo frame es más
+ * grande (el Attack suele traer espacio extra para la embestida) se dibujan a la MISMA
+ * escala que idle/walk en vez de encogerse para caber en `targetH`.
+ */
 export function drawSprite(
   ctx: CanvasRenderingContext2D,
   set: SpriteSet,
@@ -154,8 +166,10 @@ export function drawSprite(
   x: number,
   y: number,
   targetH: number,
+  baseAnim: AnimName = anim,
 ): void {
   const a = set[anim] ?? set.walk;
+  const base = set[baseAnim] ?? set.walk;
   let t = nowMs % a.totalMs;
   let frame = 0;
   for (let i = 0; i < a.durs.length; i++) {
@@ -163,7 +177,7 @@ export function drawSprite(
     if (t < d) { frame = i; break; }
     t -= d;
   }
-  const s = targetH / a.fh;
+  const s = targetH / base.fh;
   const w = a.fw * s;
   const h = a.fh * s;
   const r = a.rows > 1 ? Math.min(row, a.rows - 1) : 0;
@@ -188,7 +202,7 @@ const BOSS_BY_TYPE: Record<PokemonType, string> = {
   [T.Steel]: '0376', [T.Fairy]: '0036',
 };
 
-export function speciesForEnemy(e: Enemy): string {
+export function speciesForEnemy(e: Pick<Enemy, 'definitionId' | 'isBoss' | 'types'>): string {
   if (e.definitionId && /^\d{4}$/.test(e.definitionId)) {
     return e.definitionId;
   }

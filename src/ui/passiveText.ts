@@ -24,7 +24,7 @@ export function describePassive(stat: string, value: number): string {
     case 'GOLD': return `${v} oro por baja`;
     case 'CLICK_DAMAGE': return `${v} daño de proyectil`;
     case 'ULT_CHARGE': return `${v} carga de Definitiva`;
-    case 'BASTION_REGEN': return `${v} regeneración del Bastión/s`;
+    case 'MAX_HP': return `${v} HP máx. al equipo`;
     default: return `${v} ${stat}`;
   }
 }
@@ -48,7 +48,7 @@ export const EFFECT_LABEL: Record<SwitchInEffect, string> = {
   BURN: 'Quemadura',
   PARALYZE: 'Parálisis',
   SLOW: 'Ralentización',
-  SHIELD: 'Escudo del Bastión',
+  SHIELD: 'Escudo al relevar',
 };
 
 export const STATUS_COLOR = {

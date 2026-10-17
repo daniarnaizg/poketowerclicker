@@ -2,9 +2,9 @@
  * PokéBastion — HUD sobre la arena: piso, cronómetro de jefe, HP del Bastión y ULT.
  */
 
-import { BOSS_TIMER_DURATION } from '../../config/balance.config';
+import { BOSS_TIMER_DURATION, nextShopFloor } from '../../config/balance.config';
 import type { GameState } from '../../core/types';
-import { POKEDEX } from '../../data/pokemon';
+import { POKEDEX as POKEMON_REGISTRY } from '../../data/pokemon';
 import { AudioToggle } from './AudioToggle';
 
 interface Props {
@@ -25,16 +25,29 @@ function formatClock(totalSec: number): string {
 }
 
 export function GameHUD({ gameState, onUltimate, onToggleAutoAdvance, onStartNextWave }: Props) {
-  const hpRatio =
-    gameState.bastionMaxHp > 0
-      ? Math.max(0, Math.min(1, gameState.bastionHp / gameState.bastionMaxHp))
-      : 0;
+  const activeSlot = gameState.team.find((s) => s.isActive && s.pokemon);
+  const activePkm = activeSlot?.pokemon ?? null;
+  const activeDef = activePkm ? POKEMON_REGISTRY[activePkm.definitionId] : null;
+
+  const activeHp = activePkm ? Math.max(0, Math.ceil(activePkm.hp)) : 0;
+  const activeMaxHp = activePkm ? Math.max(1, activePkm.maxHp) : 1;
+  const hpRatio = Math.max(0, Math.min(1, activeHp / activeMaxHp));
+
+  const occupiedSlots = gameState.team.filter((s) => s.pokemon !== null);
+  const aliveCount = occupiedSlots.filter((s) => s.pokemon?.alive).length;
+  const totalCount = occupiedSlots.length;
+  const sumHp = occupiedSlots.reduce((acc, s) => acc + (s.pokemon?.alive ? Math.max(0, s.pokemon.hp) : 0), 0);
+  const sumMaxHp = Math.max(1, occupiedSlots.reduce((acc, s) => acc + (s.pokemon?.maxHp ?? 0), 0));
+  const reservePct = Math.round((sumHp / sumMaxHp) * 100);
+
+  const nextStop = nextShopFloor(gameState.floor);
+  const floorsToStop = Math.max(0, nextStop - gameState.floor);
+
   const ultRatio =
     gameState.ultimateMax > 0
       ? Math.max(0, Math.min(1, gameState.ultimateCharge / gameState.ultimateMax))
       : 0;
-  const active = gameState.team.find((s) => s.isActive)?.pokemon ?? null;
-  const ultName = active ? POKEDEX[active.definitionId]?.ultimate.name : undefined;
+  const ultName = activeDef ? activeDef.ultimate.name : undefined;
   const ultReady = gameState.ultimateMax > 0 && gameState.ultimateCharge >= gameState.ultimateMax;
   const shield = gameState.bastionShieldSec ?? 0;
   const hpColor = hpRatio > 0.5 ? '#48c048' : hpRatio >= 0.25 ? '#f8d030' : '#f04040';
@@ -47,6 +60,12 @@ export function GameHUD({ gameState, onUltimate, onToggleAutoAdvance, onStartNex
     <div class="game-hud pk-window flex shrink-0 flex-col gap-2.5 p-3">
       <div class="flex items-center justify-between gap-2 text-[10px]">
         <span class="pk-dark px-2 py-2">PISO {gameState.floor}</span>
+        <span
+          className="pk-chip bg-[#142038] text-[#78f0a0] border border-[#2a4268] text-[9px]"
+          title={`Próxima Parada de Ruta antes del piso ${nextStop} (cada 10 pisos desde el 5)`}
+        >
+          PARADA P.{nextStop} ({floorsToStop === 0 ? 'AHORA' : `${floorsToStop}P`})
+        </span>
         <span class="pk-dark px-2 py-2">SALVAJES {gameState.waveEnemiesRemaining}</span>
         {gameState.bossTimerSec !== undefined && (
           <span class="pk-dark px-2 py-2 text-[#f85848]">
@@ -81,12 +100,19 @@ export function GameHUD({ gameState, onUltimate, onToggleAutoAdvance, onStartNex
       </div>
 
       <div class="flex items-center gap-2 text-[9px]">
-        <span class="w-14 shrink-0">BASTION</span>
+        <span class="w-14 shrink-0 truncate">{activeDef ? activeDef.name.toUpperCase() : 'ACTIVO'}</span>
         <span class="pk-bar flex-1">
           <span style={{ width: `${hpRatio * 100}%`, background: hpColor }} />
         </span>
         <span class="pk-num">
-          {Math.ceil(gameState.bastionHp)}/{gameState.bastionMaxHp}
+          {activeHp}/{activeMaxHp}
+        </span>
+      </div>
+
+      <div className="flex items-center justify-between text-[10px] text-[#a8c0e0] px-0.5">
+        <span>RESERVA EQUIPO: <b className="text-white">{reservePct}%</b></span>
+        <span className={aliveCount <= 1 ? 'text-[#f85888] font-bold' : 'text-[#78f0a0]'}>
+          {aliveCount}/{totalCount} VIVOS
         </span>
       </div>
 

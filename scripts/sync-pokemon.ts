@@ -103,6 +103,11 @@ async function main(): Promise<void> {
   for (const id of Object.keys(ENEMY_DEFINITIONS)) {
     if (/^\d{4}$/.test(id)) speciesSet.add(id);
   }
+  // Route Stop (Parada) NPC species (Block 3A.2-V: Chansey 0113, Kecleon 0352)
+  const ROUTE_STOP_NPC_IDS = ['0113', '0352'];
+  for (const id of ROUTE_STOP_NPC_IDS) {
+    speciesSet.add(id);
+  }
   const speciesList = Array.from(speciesSet).sort();
   console.log(`Discovered ${speciesList.length} distinct species in dataset.`);
 

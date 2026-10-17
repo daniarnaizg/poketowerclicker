@@ -23,7 +23,6 @@ import { POKEDEX } from './data/pokemon';
 import { ARENA } from './config/arena.config';
 import {
   AUTOCLICK_CPS_BY_LEVEL,
-  BASTION_BASE_HP,
   FIXED_TIMESTEP,
   HOLD_FIRE_INTERVAL_MS,
 } from './config/balance.config';
@@ -58,14 +57,12 @@ function mulberry32(seed: number): () => number {
 }
 
 const ZERO_UPGRADES: BastionUpgradeLevels = {
-  UP_HP: 0,
   UP_MULTI: 0,
   UP_ARROW: 0,
   UP_SPD: 0,
   UP_CRIT: 0,
   UP_CDMG: 0,
   UP_GOLD: 0,
-  UP_WALL: 0,
   UP_AUTOCLICK: 0,
 };
 
@@ -84,8 +81,6 @@ function createInitialState(phase: GamePhase = 'STARTER_SELECT'): GameState {
     team: [emptySlot(0), emptySlot(1), emptySlot(2), emptySlot(3), emptySlot(4), emptySlot(5)] as Team6,
     teamLevel: 1,
     gold: 0,
-    bastionHp: BASTION_BASE_HP,
-    bastionMaxHp: BASTION_BASE_HP,
     bastionUpgrades: { ...ZERO_UPGRADES },
     enemies: [],
     projectiles: [],
@@ -102,6 +97,7 @@ function createInitialState(phase: GamePhase = 'STARTER_SELECT'): GameState {
       mvpSlotIndex: -1,
       floorReached: 1,
       durationSec: 0,
+      faintLog: [],
     },
   };
 }

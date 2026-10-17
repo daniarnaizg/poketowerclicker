@@ -6,12 +6,9 @@ import {
   ARROW_DAMAGE_PER_LEVEL,
   AUTOCLICK_CPS_BY_LEVEL,
   AUTO_SPD_BASE_MULT,
-  BASTION_REGEN_FRACTION_PER_SEC,
   CRIT_CHANCE_PER_UP_CRIT,
   GOLD_PER_LEVEL,
-  HP_PER_LEVEL,
   MULTI_MAX_LEVEL,
-  REGEN_PER_LEVEL,
   SPD_PER_LEVEL,
   teamLevelCost,
   upgradeCost,
@@ -33,14 +30,12 @@ const pct = (v: number) => `${Math.round(v * 100)}%`;
 const LEVEL_BAR_MAX = 10;
 
 const UPGRADE_INFO: Record<BastionUpgradeId, { name: string; effect: string }> = {
-  UP_HP: { name: 'Vida Máxima', effect: `+${HP_PER_LEVEL} HP máximo (y cura al comprar)` },
   UP_MULTI: { name: 'Multidisparo', effect: `+1 disparo autónomo del Pokémon (máx ${MULTI_MAX_LEVEL} mejoras)` },
   UP_ARROW: { name: 'Proyectiles', effect: `+${pct(ARROW_DAMAGE_PER_LEVEL)} daño de proyectil (manual y auto)` },
   UP_SPD: { name: 'Cadencia Auto', effect: `+${pct(SPD_PER_LEVEL)} velocidad de disparo autónomo (base ${pct(AUTO_SPD_BASE_MULT)})` },
   UP_CRIT: { name: 'Precisión', effect: `+${pct(CRIT_CHANCE_PER_UP_CRIT)} prob. de crítico` },
   UP_CDMG: { name: 'Furia', effect: '+10% daño crítico' },
   UP_GOLD: { name: 'Codicia', effect: `+${pct(GOLD_PER_LEVEL)} oro` },
-  UP_WALL: { name: 'Regeneración', effect: `+0.5% regeneración de HP/s (base ${pct(BASTION_REGEN_FRACTION_PER_SEC)}/s)` },
   UP_AUTOCLICK: { name: 'Autoclick', effect: 'Dispara proyectiles hacia donde esté tu cursor' },
 };
 
@@ -118,11 +113,6 @@ export function BastionUpgrades({ upgrades, gold, teamLevel, onPurchase, onBuyTe
               {id === 'UP_SPD' && (
                 <span class="text-[9px] text-[#555]">
                   {pct(AUTO_SPD_BASE_MULT + level * SPD_PER_LEVEL)} cadencia
-                </span>
-              )}
-              {id === 'UP_WALL' && (
-                <span class="text-[9px] text-[#555]">
-                  {((BASTION_REGEN_FRACTION_PER_SEC + level * REGEN_PER_LEVEL) * 100).toFixed(1)}% HP/s
                 </span>
               )}
               <span class="flex w-full items-center gap-1.5">

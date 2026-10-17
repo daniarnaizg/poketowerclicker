@@ -13,7 +13,7 @@ import type {
 } from '../types';
 
 const config: GameConfig = { pokedex: POKEDEX, typeChart: TYPE_CHART, seed: 1 };
-const ZERO: BastionUpgrades = { UP_HP: 0, UP_MULTI: 0, UP_ARROW: 0, UP_SPD: 0, UP_CRIT: 0, UP_CDMG: 0, UP_GOLD: 0, UP_WALL: 0 };
+const ZERO: BastionUpgrades = { UP_ARROW: 0, UP_SPD: 0, UP_MULTI: 0, UP_AUTOCLICK: 0, UP_CRIT: 0, UP_CDMG: 0, UP_GOLD: 0 };
 
 function mulberry32(seed: number): () => number {
   let a = seed;
@@ -30,7 +30,7 @@ function menuState(): GameState {
   const empty = (index: number) => ({ index, pokemon: null, isActive: false, hotSwapCooldownSec: 0 });
   return {
     phase: 'MENU', floor: 1, team: [0, 1, 2, 3, 4, 5].map(empty) as Team6, teamLevel: 1, gold: 0,
-    bastionHp: 100, bastionMaxHp: 100, bastionUpgrades: { ...ZERO }, enemies: [], projectiles: [],
+    bastionUpgrades: { ...ZERO }, enemies: [], projectiles: [],
     floatingTexts: [], ultimateCharge: 0, ultimateMax: 0, waveEnemiesRemaining: 0,
     hotSwapCooldowns: [0, 0, 0, 0, 0, 0] as Cooldowns6,
     runStats: { totalKills: 0, totalGoldEarned: 0, totalDamageDealt: 0, damagePerSlot: [0, 0, 0, 0, 0, 0], mvpSlotIndex: -1, floorReached: 1, durationSec: 0 },
@@ -173,12 +173,19 @@ describe('status ailments in the loop', () => {
   });
 
   it('shield blocks contact damage and then wears off', () => {
-    const s = { ...withEnemies(base(), [{ x: ARENA.CENTER, y: ARENA.CENTER }]), bastionShieldSec: 1, bastionHp: 50 };
+    const b = base();
+    const activeSlot = b.team.findIndex((slot) => slot.isActive);
+    const withHp50 = b.team.map((slot, idx) =>
+      idx === activeSlot && slot.pokemon ? { ...slot, pokemon: { ...slot.pokemon, hp: 50 } } : slot,
+    ) as Team6;
+    const s = { ...withEnemies({ ...b, team: withHp50 }, [{ x: ARENA.CENTER, y: ARENA.CENTER }]), bastionShieldSec: 1 };
     const n = tickGame(s, {}, config, 16.7, mulberry32(1));
-    expect(n.bastionHp).toBeGreaterThanOrEqual(50);
+    const activeN = n.team.find((slot) => slot.isActive)!.pokemon!;
+    expect(activeN.hp).toBeGreaterThanOrEqual(50);
     expect(n.floatingTexts.some((t) => t.text === 'BLOQUEO')).toBe(true);
     const later = tickGame({ ...n, bastionShieldSec: 0, enemies: withEnemies(n, [{ x: ARENA.CENTER, y: ARENA.CENTER }]).enemies }, {}, config, 16.7, mulberry32(2));
-    expect(later.bastionHp).toBeLessThan(50);
+    const activeLater = later.team.find((slot) => slot.isActive)!.pokemon!;
+    expect(activeLater.hp).toBeLessThan(50);
   });
 });
 

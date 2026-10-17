@@ -9,6 +9,7 @@ import type {
   BiomeDefinition,
   BiomeId,
   Enemy,
+  EnemyStrike,
   Entity,
   FloatingText,
   GameState,
@@ -19,8 +20,9 @@ import type {
 } from '../core/types';
 import { MAX_STARS } from '../config/balance.config';
 import { typeColor, typeLetters } from './typeColors';
-import { dirRow, drawSprite, getSprite, speciesForEnemy } from './sprites';
+import { animDurationMs, dirRow, drawSprite, getSprite, speciesForEnemy } from './sprites';
 import type { AnimName } from './sprites';
+import { decorReady, preloadDecor } from './decorSprites';
 import { biomeAt, buildBackdrop } from '../data/biomes';
 import './arena.css';
 
@@ -96,10 +98,19 @@ export function clearBackdropCache(): void {
   backdropCache.clear();
 }
 
+// Los PNG editables de public/decor/ se cargan una vez; hasta entonces se pinta suelo liso
+// para que no haya "salto" visual entre el sprite procedural y el PNG.
+void preloadDecor();
+
 export function renderBackground(
   ctx: CanvasRenderingContext2D,
   biome: BiomeDefinition = biomeAt(1),
 ): void {
+  if (!decorReady()) {
+    ctx.fillStyle = biome.palette.groundA;
+    ctx.fillRect(0, 0, ARENA.SIZE, ARENA.SIZE);
+    return;
+  }
   const canvas = getBackdrop(biome);
   if (canvas && typeof (canvas as any).getContext === 'function') {
     ctx.drawImage(canvas, 0, 0);
@@ -122,7 +133,7 @@ export function renderPokemon(
   pokemon: PlayerPokemon,
   x: number,
   y: number,
-  opts: { now?: number; dx?: number; dy?: number; anim?: AnimName } = {},
+  opts: { now?: number; dx?: number; dy?: number; anim?: AnimName; animMs?: number } = {},
 ): void {
   const r = ARENA.PLAYER_HITBOX_R;
   const set = getSprite(pokemon.definitionId);
@@ -134,7 +145,19 @@ export function renderPokemon(
     return;
   }
   drawShadow(ctx, x, y + r * 1.2, r, typeColor(pokemon.types[0]));
-  drawSprite(ctx, set, opts.anim ?? 'idle', dirRow(opts.dx ?? 0, opts.dy ?? 1), opts.now ?? performance.now(), x, y, r * 4);
+  // `animMs` permite arrancar la animación de ataque en su primer frame; la escala se toma
+  // siempre del frame de idle para que el ataque no "encoja" al Pokémon.
+  drawSprite(
+    ctx,
+    set,
+    opts.anim ?? 'idle',
+    dirRow(opts.dx ?? 0, opts.dy ?? 1),
+    opts.animMs ?? opts.now ?? performance.now(),
+    x,
+    y,
+    r * 4,
+    'idle',
+  );
 }
 
 /** Pulsing golden glow with four orbiting sparkles (5★ Aura Apex). */
@@ -180,11 +203,11 @@ const STATUS_COLOR: Record<string, string> = {
 };
 
 /** Small colored squares over an enemy for each active ailment. */
-function drawStatusPips(ctx: CanvasRenderingContext2D, enemy: Enemy, y: number): void {
+function drawStatusPips(ctx: CanvasRenderingContext2D, enemy: Enemy, x: number, y: number): void {
   const statuses = enemy.statuses;
   if (!statuses || statuses.length === 0) return;
   statuses.forEach((st, i) => {
-    const px = Math.round(enemy.x - (statuses.length * 8) / 2 + i * 8);
+    const px = Math.round(x - (statuses.length * 8) / 2 + i * 8);
     ctx.fillStyle = INK;
     ctx.fillRect(px - 1, y - 1, 8, 8);
     ctx.fillStyle = STATUS_COLOR[st.id] ?? INK;
@@ -274,27 +297,137 @@ export function renderEffects(ctx: CanvasRenderingContext2D, effects: readonly V
   }
 }
 
+/** Tras terminar la animación de ataque, el atacante se queda un instante en el último frame. */
+const ATTACK_HOLD_MS = 150;
+/** Fundido final del atacante normal antes de despawnear. */
+const GHOST_FADE_MS = 140;
+/** Distancia visual (px) del centro a la que se dibuja un atacante normal. */
+const STRIKE_DRAW_DIST = ARENA.BASTION_DAMAGE_R + 10;
+/** Cuánto se aparta visualmente un jefe anclado para no quedar tapado por el Pokémon central. */
+const BOSS_ANCHOR_PUSH = 14;
+
+function pushOutward(x: number, y: number, dist: number): { x: number; y: number } {
+  const dx = x - ARENA.CENTER;
+  const dy = y - ARENA.CENTER;
+  const d = Math.hypot(dx, dy);
+  if (d < 0.001) return { x: ARENA.CENTER, y: ARENA.CENTER - dist };
+  return { x: ARENA.CENTER + (dx / d) * dist, y: ARENA.CENTER + (dy / d) * dist };
+}
+
+/**
+ * Posición donde se DIBUJA un enemigo (no afecta a la simulación). Un jefe anclado en el
+ * Bastión se aparta unos px hacia fuera para que se vea junto al Pokémon central, no detrás.
+ */
+export function enemyDrawPos(enemy: Enemy): { x: number; y: number } {
+  if (enemy.isBoss && enemy.anchoredAtBastion) {
+    const d = Math.hypot(enemy.x - ARENA.CENTER, enemy.y - ARENA.CENTER);
+    return pushOutward(enemy.x, enemy.y, Math.max(d, ARENA.BASTION_DAMAGE_R) + BOSS_ANCHOR_PUSH);
+  }
+  return { x: enemy.x, y: enemy.y };
+}
+
+interface DrawItem {
+  y: number;
+  /** true = se pinta por encima del Pokémon central (atacantes situados debajo de él). */
+  front: boolean;
+  draw: () => void;
+}
+
+/** Strike más reciente de un enemigo (el de menor edad). */
+function latestStrike(strikes: readonly EnemyStrike[], enemyId: number): EnemyStrike | null {
+  let best: EnemyStrike | null = null;
+  for (const st of strikes) if (st.enemyId === enemyId && (!best || st.age < best.age)) best = st;
+  return best;
+}
+
+function enemyItems(
+  ctx: CanvasRenderingContext2D,
+  enemies: readonly Enemy[],
+  strikes: readonly EnemyStrike[],
+  now: number,
+): DrawItem[] {
+  const items: DrawItem[] = [];
+
+  for (const enemy of enemies) {
+    if (!enemy.alive) continue;
+    const r = enemyRadius(enemy);
+    const pos = enemyDrawPos(enemy);
+    const anchored = !!(enemy.isBoss && enemy.anchoredAtBastion);
+    items.push({
+      y: pos.y,
+      front: anchored && pos.y > ARENA.CENTER,
+      draw: () => {
+        const set = getSprite(speciesForEnemy(enemy));
+        if (set) {
+          drawShadow(ctx, pos.x, pos.y + r * 1.2, r, typeColor(enemy.types[0]));
+          const row = dirRow(ARENA.CENTER - pos.x, ARENA.CENTER - pos.y);
+          if (anchored) {
+            // Jefe en el Bastión: Attack en cada golpe y Idle entre golpes.
+            const strike = latestStrike(strikes, enemy.id);
+            const atkMs = set.attack ? animDurationMs(set, 'attack') : 0;
+            if (strike && set.attack && strike.age * 1000 < atkMs + ATTACK_HOLD_MS) {
+              drawSprite(ctx, set, 'attack', row, Math.min(strike.age * 1000, atkMs - 1), pos.x, pos.y, r * 4, 'walk');
+            } else {
+              drawSprite(ctx, set, set.idle ? 'idle' : 'walk', row, now + enemy.id * 137, pos.x, pos.y, r * 4, 'walk');
+            }
+          } else {
+            drawSprite(ctx, set, 'walk', row, now + enemy.id * 137, pos.x, pos.y, r * 4);
+          }
+        } else {
+          drawEntityCircle(ctx, pos.x, pos.y, r, typeColor(enemy.types[0]));
+          drawTypeLabel(ctx, enemy.types, pos.x, pos.y);
+        }
+        if (enemy.isBoss) drawCrown(ctx, pos.x, pos.y - r * 2 + 2);
+        drawStatusPips(ctx, enemy, pos.x, pos.y - r * 2 - HP_BAR_GAP - 11);
+      },
+    });
+  }
+
+  // Enemigos normales que acaban de llegar al Bastión: ya están muertos para la simulación,
+  // pero se ven atacar (animación Attack completa) y se desvanecen.
+  for (const st of strikes) {
+    if (st.isBoss) continue;
+    const set = getSprite(speciesForEnemy(st));
+    if (!set) continue;
+    const atkMs = set.attack ? animDurationMs(set, 'attack') : 0;
+    const lifeMs = atkMs + ATTACK_HOLD_MS;
+    const ageMs = st.age * 1000;
+    if (ageMs >= lifeMs) continue;
+    const r = ARENA.ENEMY_HITBOX_R;
+    const pos = pushOutward(st.x, st.y, STRIKE_DRAW_DIST);
+    items.push({
+      y: pos.y,
+      front: pos.y > ARENA.CENTER,
+      draw: () => {
+        ctx.globalAlpha = Math.max(0, Math.min(1, (lifeMs - ageMs) / GHOST_FADE_MS));
+        drawShadow(ctx, pos.x, pos.y + r * 1.2, r, typeColor(st.types[0]));
+        const row = dirRow(ARENA.CENTER - pos.x, ARENA.CENTER - pos.y);
+        if (set.attack) drawSprite(ctx, set, 'attack', row, Math.min(ageMs, atkMs - 1), pos.x, pos.y, r * 4, 'walk');
+        else drawSprite(ctx, set, 'walk', row, now, pos.x, pos.y, r * 4);
+        ctx.globalAlpha = 1;
+      },
+    });
+  }
+
+  return items;
+}
+
+/**
+ * Dibuja enemigos y atacantes ordenados por Y. `layer` permite pintar en dos pasadas
+ * ('back' antes del Pokémon central, 'front' después) para que un atacante situado
+ * debajo del Pokémon central se vea delante de él.
+ */
 export function renderEnemies(
   ctx: CanvasRenderingContext2D,
   enemies: Enemy[],
   now: number = performance.now(),
+  strikes: readonly EnemyStrike[] = [],
+  layer: 'all' | 'back' | 'front' = 'all',
 ): void {
-  // Orden por Y para que los de más abajo tapen a los de arriba.
-  const alive = enemies.filter((e) => e.alive).sort((p, q) => p.y - q.y);
-  for (const enemy of alive) {
-    const r = enemyRadius(enemy);
-    const set = getSprite(speciesForEnemy(enemy));
-    if (set) {
-      drawShadow(ctx, enemy.x, enemy.y + r * 1.2, r, typeColor(enemy.types[0]));
-      const row = dirRow(ARENA.CENTER - enemy.x, ARENA.CENTER - enemy.y);
-      drawSprite(ctx, set, 'walk', row, now + enemy.id * 137, enemy.x, enemy.y, r * 4);
-    } else {
-      drawEntityCircle(ctx, enemy.x, enemy.y, r, typeColor(enemy.types[0]));
-      drawTypeLabel(ctx, enemy.types, enemy.x, enemy.y);
-    }
-    if (enemy.isBoss) drawCrown(ctx, enemy.x, enemy.y - r * 2 + 2);
-    drawStatusPips(ctx, enemy, enemy.y - r * 2 - HP_BAR_GAP - 11);
-  }
+  const items = enemyItems(ctx, enemies, strikes, now)
+    .filter((it) => layer === 'all' || (layer === 'front') === it.front)
+    .sort((p, q) => p.y - q.y);
+  for (const it of items) it.draw();
 }
 
 function drawCrown(ctx: CanvasRenderingContext2D, x: number, y: number): void {
@@ -379,7 +512,10 @@ function activePokemon(state: GameState): PlayerPokemon | null {
 export class ArenaRenderer {
   private readonly canvas: HTMLCanvasElement;
   private readonly ctx: CanvasRenderingContext2D;
-  private lastFireMs = -1e9;
+  /** Instante en que arrancó la última animación de ataque del Pokémon central. */
+  private attackStartMs = -1e9;
+  /** Ids de proyectiles del jugador ya vistos cerca del centro (detecta disparos NUEVOS). */
+  private seenShots = new Set<number>();
 
   constructor(canvas: HTMLCanvasElement) {
     const ctx = canvas.getContext('2d');
@@ -408,23 +544,37 @@ export class ArenaRenderer {
       const d = Math.hypot(e.x - C, e.y - C);
       if (d < best) { best = d; dx = e.x - C; dy = e.y - C; }
     }
-    if (state.projectiles.some((p) => p.fromPlayer && Math.hypot(p.x - C, p.y - C) < 48)) {
-      this.lastFireMs = now;
+    // Cada disparo nuevo reinicia la animación de ataque desde su primer frame.
+    const shots = new Set<number>();
+    let fired = false;
+    for (const p of state.projectiles) {
+      if (!p.fromPlayer || Math.hypot(p.x - C, p.y - C) >= 48) continue;
+      shots.add(p.id);
+      if (!this.seenShots.has(p.id)) fired = true;
     }
-    const anim: AnimName = now - this.lastFireMs < 350 ? 'attack' : 'idle';
+    this.seenShots = shots;
+    if (fired) this.attackStartMs = now;
+    const activeSet = active ? getSprite(active.definitionId) : null;
+    const attackTotal = activeSet?.attack ? animDurationMs(activeSet, 'attack') : 350;
+    const attacking = now - this.attackStartMs < attackTotal;
+    const anim: AnimName = attacking ? 'attack' : 'idle';
+    const animMs = attacking ? now - this.attackStartMs : now;
 
     const biome = biomeAt(state.floor);
     renderBackground(ctx, biome);
     if ((state.bastionShieldSec ?? 0) > 0) drawShield(ctx, state.bastionShieldSec ?? 0, now);
-    renderEnemies(ctx, state.enemies, now);
+    const strikes = state.strikes ?? [];
+    renderEnemies(ctx, state.enemies, now, strikes, 'back');
     renderProjectiles(ctx, state.projectiles);
-    if (active) renderPokemon(ctx, active, C, C, { now, dx, dy, anim });
+    if (active) renderPokemon(ctx, active, C, C, { now, dx, dy, anim, animMs });
+    renderEnemies(ctx, state.enemies, now, strikes, 'front');
     renderEffects(ctx, state.effects ?? []);
     renderFloatingText(ctx, state.floatingTexts);
 
     for (const enemy of state.enemies) {
       if (!enemy.alive) continue;
-      renderHPBar(ctx, enemy, enemy.x, enemy.y - enemyRadius(enemy) * 2 - HP_BAR_GAP, HP_BAR_WIDTH);
+      const pos = enemyDrawPos(enemy);
+      renderHPBar(ctx, enemy, pos.x, pos.y - enemyRadius(enemy) * 2 - HP_BAR_GAP, HP_BAR_WIDTH);
     }
     if (active) {
       renderHPBar(ctx, active, C, C - ARENA.PLAYER_HITBOX_R * 2 - HP_BAR_GAP, HP_BAR_WIDTH);

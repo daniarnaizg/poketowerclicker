@@ -21,7 +21,7 @@ Documento de Requisitos de Producto para un juego de defensa e incremento progre
 
 Un juego web *Roguelite Idle Defense* con coleccionismo **Gacha** y gestión táctica de equipo. El jugador empieza eligiendo un Pokémon Inicial clásico, forma un escuadrón de **máximo 6 Pokémon por run** y **su propio equipo es la defensa** en una **arena cuadrada simétrica con un único Pokémon activo en pantalla a la vez**.
 
-El jugador alterna en tiempo real (*Hot-Swap*) entre los miembros de su equipo para explotar debilidades elementales, proteger a Pokémon heridos mediante resistencias defensivas y gestionar recursos en **Paradas de Ruta** cada 5 pisos frente a oleadas de enemigos que avanzan en 360°, Mini-Bosses cada 10 pisos y Grandes Bosses en los pisos 50 y 100.
+El jugador alterna en tiempo real (*Hot-Swap*) entre los miembros de su equipo para explotar debilidades elementales, proteger a Pokémon heridos mediante resistencias defensivas y gestionar recursos en **Paradas de Ruta** cada 10 pisos (empezando en el piso 5: 5, 15, 25, 35…) frente a oleadas de enemigos que avanzan en 360°, Mini-Bosses cada 10 pisos y Grandes Bosses en los pisos 50 y 100.
 
 ### Filosofía de Despliegue (Coste Cero / Bajo Mantenimiento)
 
@@ -30,7 +30,7 @@ Todo el bucle de juego, físicas, cálculo de daño y guardado primario se ejecu
 ### Diferenciación Clave
 
 * **Un Único Pokémon Activo + Banquillo de 5:** Solo el Pokémon activo combate y recibe daño en el centro de la arena cuadrada; los otros 5 aguardan a salvo en la reserva listos para entrar al relevo y aportar sus bonificaciones pasivas de equipo (`BENCH_PASSIVE`) y Sinergias de Tipo mientras sigan con vida.
-* **Vidas Individuales, Permadeath Táctico y Paradas de Ruta (v2.5):** No existe una barra de salud global del Bastión; cada Pokémon tiene su propio HP (escalado por especie y Nivel de Equipo) y puede caer **Debilitado** (apagando sus pasivas y sinergias). No hay regeneración pasiva en combate: curar y revivir ocurre **exclusivamente en Paradas cada 5 pisos** (eligiendo un único servicio pagado con el mismo oro que financia las mejoras), creando un dilema real entre potencia ofensiva y supervivencia.
+* **Vidas Individuales, Permadeath Táctico y Paradas de Ruta (v2.5):** No existe una barra de salud global del Bastión; cada Pokémon tiene su propio HP (escalado por especie y Nivel de Equipo) y puede caer **Debilitado** (apagando sus pasivas y sinergias). No hay regeneración pasiva en combate: curar y revivir ocurre **exclusivamente en Paradas cada 10 pisos empezando en el piso 5** (`5, 15, 25, 35…`, eligiendo un único servicio pagado con el mismo oro que financia las mejoras), creando un dilema real entre potencia ofensiva y supervivencia.
 * **Gacha con Propósito Táctico y Despertar (1★ a 5★):** Desbloquear duplicados no adelanta la evolución, sino que desbloquea pasivas de banquillo, potencia los ataques de entrada (*Switch-In Bonus*), amplía los patrones de disparo y desbloquea el *Aura Apex* (el aspecto *Shiny* es un coleccionable de suerte independiente, ver §9.7).
 * **Rotación en Tiempo Real (Tag-In Elemental Ofensivo y Defensivo):** El jugador alterna qué Pokémon está en el campo tanto para maximizar el daño elemental como para mitigar el daño recibido (que también usa la tabla de tipos) y evitar que caiga un miembro clave del equipo.
 * **Evolución por Niveles Canónicos:** Cada Pokémon evoluciona durante la run en sus **niveles reales de los juegos originales** (ej. Charmander evoluciona a Charmeleon a Nv. 16 y a Charizard a Nv. 36; Caterpie a Nv. 7 y 10; Dratini a Nv. 30 y 55).
@@ -175,7 +175,7 @@ El resto de la pantalla alberga la interfaz:
 | `UP_GOLD` | **Codicia** (*Amuleto Moneda*) | +10% oro obtenido por enemigo eliminado por nivel. |
 | `UP_AUTOCLICK` | **Autoclick** | Dispara proyectiles automáticos hacia el cursor (escritorio) o punto fijado (táctil); subir nivel aumenta la cadencia (`1 → 1.5 → 2 → 3 → 4` clics/s, máx. 5 niveles). |
 
-* **Fin de la estrategia de "tanquear fugas" y cero regeneración pasiva (Decisiones D2, D6, D10):** Al no existir mejoras repetibles de HP/regeneración con oro y aplicarse el daño de fugas directamente sobre la vida finita del Pokémon activo (§4.4.2), es imposible avanzar pisos ignorando el daño ofensivo. El oro se reparte entre **matar más rápido / subir Nivel de Equipo** y **pagar curas o revivires cada 5 pisos en las Paradas**.
+* **Fin de la estrategia de "tanquear fugas" y cero regeneración pasiva (Decisiones D2, D6, D10):** Al no existir mejoras repetibles de HP/regeneración con oro y aplicarse el daño de fugas directamente sobre la vida finita del Pokémon activo (§4.4.2), es imposible avanzar pisos ignorando el daño ofensivo. El oro se reparte entre **matar más rápido / subir Nivel de Equipo** y **pagar curas o revivires cada 10 pisos (5, 15, 25…) en las Paradas**.
 
 ---
 
@@ -241,7 +241,7 @@ $$\text{maxHp} = \left\lfloor \text{HP\_BASE} \times \text{hpFactor}(\text{espec
 * **Relevo Forzado (Decisión D16):** En el instante en que cae el activo, el motor selecciona al vivo con mayor `swapScore` (§9.3.6) y lo coloca en la arena sin activar el cooldown de 4 s y disparando su Ataque de Entrada. Si ningún Pokémon sigue vivo ⇒ `GAME_OVER` (`defeatCause = 'teamWiped'`).
 
 #### 4.4.4. Paradas de Ruta (Decisiones D11–D14, D18)
-* **Frecuencia (Decisión D11):** Se celebra una Parada **antes de cada piso múltiplo de 5** (`f % 5 === 0`: antes de los pisos 5, 10, 15, 20…, tanto en Campaña como en la Torre del Destino; constante `SHOP_EVERY_N_FLOORS = 5` *(ajustable)*). En los pisos de jefe (10, 20, 50, 100…) la Parada actúa como antesala de preparación.
+* **Frecuencia (Decisión D11):** Se celebra una Parada **cada 10 pisos empezando en el piso 5** (`f >= 5 && (f - 5) % 10 === 0`: antes de los pisos **5, 15, 25, 35, 45…**, tanto en Campaña como en la Torre del Destino; constantes `SHOP_FIRST_FLOOR = 5`, `SHOP_EVERY_N_FLOORS = 10` *(ajustables)*). De este modo, cada Parada se sitúa exactamente a mitad de cada ciclo de 10 pisos (5 pisos antes del próximo Mini-Boss o Gran Boss), sirviendo como punto de avituallamiento y planificación del ciclo.
 * **Flujo y Auto-omisión:** Al limpiar el piso `f − 1` y concluir el respiro (`INTER_WAVE_BREAK_SEC`), si al menos un Pokémon del equipo está herido (`hp < maxHp`) o debilitado (`!alive`), el juego entra en estado de parada (`state.shop`): **la siguiente oleada no se genera y se detienen todos los temporizadores** (pausa total sin límite de tiempo, respetando la filosofía idle). Si todo el equipo está al 100% de HP, la Parada **no abre el modal** y muestra un aviso breve (*"Parada superada — equipo al máximo"*).
 * **Regla de Una Acción y Menú Fijo de 3 Servicios (Decisiones D12–D14 confirmadas):**
   * Cada Parada presenta siempre los mismos **3 servicios** (sin RNG de catálogo).
@@ -255,7 +255,7 @@ $$\text{maxHp} = \left\lfloor \text{HP\_BASE} \times \text{hpFactor}(\text{espec
 | `REVIVE_ONE` (**Revivir**) | Devuelve a la vida a un Pokémon **debilitado** elegido con el **50% de su `maxHp`** (reactiva su pasiva y sinergias). | $\lfloor 2,5 \cdot W(\text{piso}) \times 1,25^{\text{revivesUsed}} \rfloor$ *(+25% acumulativo por cada revivir previo en la run)* |
 
 * **Estados de disponibilidad:** Un servicio sin objetivo válido o sin oro suficiente aparece deshabilitado indicando el motivo (`NOBODY_HURT`, `NOBODY_FAINTED`, `CANT_AFFORD`).
-* **Informe de Ruta (Decisión D18):** El modal de Parada incluye un panel de inteligencia con los **tipos elementales dominantes** del próximo bloque de 5 pisos y, cuando el bloque culmina en jefe (o es piso de jefe inmediato), **la especie, tipos y fases del jefe** (calculado de forma pura mediante `previewWave(seed, floor)` sobre el canal `WAVE`). Esto convierte la elección del servicio en una decisión táctica informada (*"revivo a mi tipo Agua porque viene Arcanine"*).
+* **Informe de Ruta (Decisión D18):** El modal de Parada incluye un panel de inteligencia con los **tipos elementales dominantes** del próximo bloque de 10 pisos (`beforeFloor` a `beforeFloor + 9`) y **la especie, tipos y fases del jefe intermedio (`beforeFloor + 5`, ej. piso 10, 20, 50…)** (calculado de forma pura mediante `previewWave(seed, floor)` sobre el canal `WAVE`). Esto convierte la elección del servicio en una decisión táctica informada (*"revivo a mi tipo Agua en el piso 55 porque en el 60 viene Arcanine"*).
 * **Identidad visual (PMD):** Atendida por **Chansey** (`0113`) con su retrato y sprite de PMDCollab (y **Kecleon** `0352` reservado en backlog para futura tienda de servicios tácticos).
 
 #### 4.4.5. Contratos de Datos de Vitalidad y Paradas
@@ -279,7 +279,7 @@ export interface RouteReport {
 }
 
 export interface ShopState {
-  beforeFloor: number;       // piso múltiplo de 5 que se generará al cerrar la parada
+  beforeFloor: number;       // piso de parada (5, 15, 25…) que se generará al cerrar la parada
   services: ShopService[];   // menú fijo de 3 entradas
   routeReport: RouteReport;  // función pura de (seed, beforeFloor)
 }
@@ -305,12 +305,12 @@ export interface ShopState {
 | Tipo de Piso / Evento | Pisos | Características del Encuentro |
 | :--- | :--- | :--- |
 | **Oleada Normal** | Todos excepto múltiplos de 10 | Horda de 10 enemigos salvajes del bioma actual avanzando en 360°. |
-| **Parada de Ruta** | **Antes de cada múltiplo de 5** (5, 10, 15, 20, 25…) | Pausa táctica con Informe de Ruta y menú de 1 acción (`HEAL_ONE`, `HEAL_TEAM`, `REVIVE_ONE`, §4.4.4). |
+| **Parada de Ruta** | **Cada 10 pisos desde el piso 5** (5, 15, 25, 35, 45…) | Pausa táctica a mitad de cada ciclo con Informe de Ruta (incluyendo el jefe del piso `f + 5`) y menú de 1 acción (`HEAL_ONE`, `HEAL_TEAM`, `REVIVE_ONE`, §4.4.4). |
 | **Mini-Boss** | **Cada 10 pisos** (10, 20, 30, 40, 60, 70, 80, 90...) | Jefe de zona con ×10 HP y cronómetro de **30 s**. **Se ancla al perímetro central** al llegar y golpea periódicamente al **Pokémon activo** hasta morir o agotar el tiempo. Otorga oro extra y Sellos Gacha al ser **abatido** por primera vez. |
 | **Gran Boss (Major Boss)** | **Pisos 50 y 100** (y cada 50 pisos en la Torre: 150, 200, 250…) | Jefes principales de hito (cronómetro de **45 s** en piso 50 y **60 s** en piso 100) con cambio de fase elemental y anclaje que exigen rotación táctica activa. |
 
 * **Mecánica de Anclaje de Jefe (Decisión D1 + D7/D8):** Un jefe (Mini-Boss o Gran Boss) **nunca se autodestruye ni cuenta como "fuga" al tocar el centro**. Cuando alcanza `BASTION_DAMAGE_R` (24 px del centro), se detiene en el perímetro y **golpea periódicamente al Pokémon activo** (1 golpe/s equivalente al **6% del HP máximo del activo × efectividad de tipos**, respetando el escudo de 3★ si está activo) mientras el cronómetro de jefe sigue corriendo. Si el golpe debilita al Pokémon activo, se ejecuta el **Relevo Forzado** (D16) y el jefe continúa golpeando al nuevo activo. La única forma de superar un piso de jefe (y de registrar su primera victoria para Sellos en `settleRun`) es **reducir su HP a 0 antes de que todo el equipo caiga debilitado o el reloj llegue a 0**.
-* **Respiro entre oleadas:** al limpiar un piso el siguiente no aparece de golpe: hay **2,75 s de respiro** (la carga de Definitiva sigue corriendo; **no existe regeneración de HP**) antes de invocar el nuevo piso (o de abrir la Parada si el siguiente piso es múltiplo de 5). El jugador puede adelantarlo con el botón *Siguiente Piso* o desactivar el avance automático con el chip *AUTO* para esperar de forma indefinida.
+* **Respiro entre oleadas:** al limpiar un piso el siguiente no aparece de golpe: hay **2,75 s de respiro** (la carga de Definitiva sigue corriendo; **no existe regeneración de HP**) antes de invocar el nuevo piso (o de abrir la Parada si el siguiente piso cumple `f >= 5 && (f - 5) % 10 === 0`). El jugador puede adelantarlo con el botón *Siguiente Piso* o desactivar el avance automático con el chip *AUTO* para esperar de forma indefinida.
 
 ### 5.2. Modo Campaña / Expedición por Biomas
 
@@ -330,7 +330,7 @@ export interface ShopState {
 * **Desbloqueo Único:** Superar la Oleada 100 de Campaña por primera vez.
 * **Mecánica Idéntica a Campaña:**
   * Los enemigos siguen soltando oro en tiempo real.
-  * El jugador invierte oro en las 7 mejoras, en el Nivel de Equipo y en las **Paradas cada 5 pisos** con normalidad.
+  * El jugador invierte oro en las 7 mejoras, en el Nivel de Equipo y en las **Paradas cada 10 pisos (5, 15, 25…)** con normalidad.
   * Mantiene Mini-Bosses cada 10 pisos y Grandes Bosses cada 50 pisos (50, 100, 150, 200...).
 * **Diferenciación:**
   * **Registro de Récord:** la derrota (`teamWiped` o `bossTimerExpired`) termina el intento en **todos** los modos (§4.2); en la Torre, además, el piso alcanzado se registra como récord (y, en la Fase 4, en el Ranking Global).
@@ -443,7 +443,7 @@ export interface PokemonDefinition {
 
 ### 7.3. Balanceo Centralizado y Simulador Headless
 
-* **Archivo de Configuración Único (`src/config/balance.config.ts`):** Todas las constantes de vitalidad (`HP_BASE`, `HP_LEVEL_SCALE`, `LEAK_BASE`), tarifas de Parada (`SHOP_EVERY_N_FLOORS`, `REVIVE_PRICE_GROWTH`, `REVIVE_HP_FRACTION`, `FAINTED_PASSIVE_FACTOR`), crecimiento de oro, multiplicadores de tipos, vida de bosses y probabilidades del Gacha residen en un solo archivo.
+* **Archivo de Configuración Único (`src/config/balance.config.ts`):** Todas las constantes de vitalidad (`HP_BASE`, `HP_LEVEL_SCALE`, `LEAK_BASE`), tarifas de Parada (`SHOP_FIRST_FLOOR = 5`, `SHOP_EVERY_N_FLOORS = 10`, `REVIVE_PRICE_GROWTH`, `REVIVE_HP_FRACTION`, `FAINTED_PASSIVE_FACTOR`), crecimiento de oro, multiplicadores de tipos, vida de bosses y probabilidades del Gacha residen en un solo archivo.
 * **Simulador de Economía y Supervivencia (`pnpm run test:balance`):** Script de consola que ejecuta miles de oleadas en segundos simulando distintas políticas de relevo y compra en Paradas (`NO_SHOP`, `HEAL_FIRST`, `REVIVE_FIRST`, `SMART`, `CARRY`, `ROTATE`) para verificar las curvas antes de desplegar a producción.
 
 ### 7.4. Distribución de Sprites, Assets y Licencia
@@ -477,7 +477,7 @@ export interface PokemonDefinition {
 > En `HEAD 89abb76` se completaron los bloques `3A.1` (suelo de inmunidad `×0.25` y responsive 1080p), `3A.3` (seguimiento `pointermove` y `UP_AUTOCLICK` con proyectiles dirigidos) y `3A.4` (RNG por canal, `EnemyDefinition`/`BiomeDefinition`, sprites locales y fondos procedurales `buildBackdrop`), además del anclaje de jefes D1 y el registro de victorias reales I2. En **v2.5**, antes de pasar a la Fase 3B (Sinergias y Climas), el bloque `3A.2` se expande en **tres sub-bloques secuenciales (`3A.2-V`, `3A.2-P`, `3A.2-S`)** para sustituir el Bastión global por **Vitalidad Individual y Paradas de Ruta** y realizar una **única calibración definitiva** en el Simulador v3.
 
 #### 3A — Fundaciones del Mundo, Vitalidad Individual, Paradas y "Curva v2"
-*Objetivo: que cada Pokémon tenga vida propia y el equipo sea la defensa, que curar/revivir ocurra solo en Paradas cada 5 pisos compitiendo por el oro, y que el progreso dependa de abatir enemigos/jefes y rotar con cabeza.*
+*Objetivo: que cada Pokémon tenga vida propia y el equipo sea la defensa, que curar/revivir ocurra solo en Paradas cada 10 pisos (desde el piso 5: 5, 15, 25…) compitiendo por el oro, y que el progreso dependa de abatir enemigos/jefes y rotar con cabeza.*
 
 **Bloque 3A.1 — Higiene y Quick Wins de UX/Combate *(completado en `89abb76`)*:**
 * [x] **Higiene de repositorio:** verificación de `pnpm test` + `pnpm build` en verde.
@@ -489,17 +489,17 @@ export interface PokemonDefinition {
 * [x] **Victoria real sobre Jefes (I2):** `RunStats` registra `defeatedBossFloors` solo cuando `boss.hp <= 0`; `settleRun` otorga Sellos de primera victoria únicamente por jefes **abatidos**.
 * [x] **Viabilidad Idle inicial (D3):** el auto-disparo inicial abate las primeras oleadas sin necesidad de clics.
 
-**Bloque 3A.2-V — Vitalidad Individual por Pokémon (D6–D10, D15–D17):**
-* [ ] **Salud por especie y Nivel de Equipo:** Añadir `baseStats.hp` y `hpFactor` (`[0,6 ; 1,8]`) en `PokemonDefinition`/`sync:pokemon`; calcular `maxHp` real en `createPlayerPokemon`, `upgradeTeamLevel` y evolución conservando el ratio `hp / maxHp` (§4.4.1). Colchón inicial para run de 1 Pokémon.
-* [ ] **Enrutado de daño al Pokémon activo:** Fugas (`LEAK_BASE(piso) × efectividad`) y golpes de jefe anclado (`BOSS_ANCHOR_MAX_HP_FRACTION × maxHp activo × efectividad`) dañan solo al activo; descarte del daño sobrante tras KO; Escudo 3★ sobre el activo (§4.4.2).
-* [ ] **Estado Debilitado, Relevo Forzado y `teamWiped`:** Al llegar a `hp ≤ 0` ⇒ `alive = false`, apaga `BENCH_PASSIVE` y Sinergias (`FAINTED_PASSIVE_FACTOR = 0`), ejecuta relevo forzado al mejor candidato vivo (`swapScore` + Ataque de Entrada, sin cooldown) o declara `GAME_OVER` (`defeatCause = 'teamWiped'`).
-* [ ] **Eliminación de Bastión global, curas y mejoras de HP:** Quitar `bastionHp/bastionMaxHp`, regeneración pasiva, **`UP_HP`** y **`UP_WALL`** (quedan **7 mejoras con oro**). Reconvertir la pasiva `BASTION_REGEN` de **Mudkip** (`+12%`) y **Snorlax** (`+20%`) a `MAX_HP`.
-* [ ] **UI de Vitalidad y Cementerio:** En `GameHUD`, barra del activo + **Reserva del equipo** (`Σ hp / Σ maxHp`, `N/M vivos`); estados visuales en `TeamBar`; `faintLog` y **Cementerio** en `GameOverModal` (§4.4.5). Tests unitarios de vitalidad, KO y relevo forzado.
+**Bloque 3A.2-V — Vitalidad Individual por Pokémon (D6–D10, D15–D17) *(completado)*:**
+* [x] **Salud por especie y Nivel de Equipo:** Añadir `baseStats.hp` y `hpFactor` (`[0,6 ; 1,8]`) en `PokemonDefinition`/`sync:pokemon`; calcular `maxHp` real en `createPlayerPokemon`, `upgradeTeamLevel` y evolución conservando el ratio `hp / maxHp` (§4.4.1). Colchón inicial para run de 1 Pokémon.
+* [x] **Enrutado de daño al Pokémon activo:** Fugas (`LEAK_BASE(piso) × efectividad`) y golpes de jefe anclado (`BOSS_ANCHOR_MAX_HP_FRACTION × maxHp activo × efectividad`) dañan solo al activo; descarte del daño sobrante tras KO; Escudo 3★ sobre el activo (§4.4.2).
+* [x] **Estado Debilitado, Relevo Forzado y `teamWiped`:** Al llegar a `hp ≤ 0` ⇒ `alive = false`, apaga `BENCH_PASSIVE` y Sinergias (`FAINTED_PASSIVE_FACTOR = 0`), ejecuta relevo forzado al mejor candidato vivo (`swapScore` + Ataque de Entrada, sin cooldown) o declara `GAME_OVER` (`defeatCause = 'teamWiped'`).
+* [x] **Eliminación de Bastión global, curas y mejoras de HP:** Quitar `bastionHp/bastionMaxHp`, regeneración pasiva, **`UP_HP`** y **`UP_WALL`** (quedan **7 mejoras con oro**). Reconvertir la pasiva `BASTION_REGEN` de **Mudkip** (`+12%`) y **Snorlax** (`+20%`) a `MAX_HP`.
+* [x] **UI de Vitalidad y Cementerio:** En `GameHUD`, barra del activo + **Reserva del equipo** (`Σ hp / Σ maxHp`, `N/M vivos`) + chip de próxima parada (`SHOP_FIRST_FLOOR = 5`, `SHOP_EVERY_N_FLOORS = 10`); estados visuales en `TeamBar`; `faintLog` y **Cementerio** en `GameOverModal` (§4.4.5). Tests unitarios de vitalidad, KO y relevo forzado.
 
 **Bloque 3A.2-P — Paradas de Ruta e Informe de Ruta (D11–D14, D18, D19):**
-* [ ] **Estado de Parada (`ShopState`) y flujo cada 5 pisos:** Antes de cada piso múltiplo de 5 (`SHOP_EVERY_N_FLOORS = 5`), al terminar el respiro, abrir Parada bloqueando el spawn de oleada y temporizadores (o auto-omitir con aviso si nadie está herido ni debilitado).
+* [ ] **Estado de Parada (`ShopState`) y flujo cada 10 pisos desde el piso 5:** Antes de los pisos `5, 15, 25, 35…` (`SHOP_FIRST_FLOOR = 5`, `SHOP_EVERY_N_FLOORS = 10`, condición `f >= 5 && (f - 5) % 10 === 0`), al terminar el respiro, abrir Parada bloqueando el spawn de oleada y temporizadores (o auto-omitir con aviso si nadie está herido ni debilitado).
 * [ ] **Menú fijo de 3 servicios (1 acción por parada):** `HEAL_ONE` (100% HP, `1,0 W × fracción`), `HEAL_TEAM` (+40% HP a vivos, `1,0 W × Σ fracciones`) y `REVIVE_ONE` (50% HP, `2,5 W × 1,25^revivesUsed`) a través de `GameInput.shopAction` (§4.4.4).
-* [ ] **Informe de Ruta determinista (`previewWave`):** Función pura sobre `(seed, floor)` que expone tipos dominantes del bloque y datos del próximo jefe.
+* [ ] **Informe de Ruta determinista (`previewWave`):** Función pura sobre `(seed, floor)` que expone tipos dominantes del bloque de 10 pisos y datos del próximo jefe (`beforeFloor + 5`).
 * [ ] **UI de Parada (`ShopModal.tsx`) y assets de NPC:** Modal con las 3 tarjetas de servicio, Informe de Ruta, botón *Seguir*, sprite de **Chansey (`0113`)** en `sync:pokemon`, chip **"Próxima parada: N pisos"** en HUD y registro en `shopLog`. Tests unitarios de paradas y precios.
 
 **Bloque 3A.2-S — Simulador `pnpm run test:balance` v3 y Único Recalibrado:**
@@ -553,14 +553,14 @@ export interface PokemonDefinition {
 3. Misma `seed` ⇒ mismos fugitivos y mismos Shiny salvajes (apto para el Desafío Diario).
 
 #### 3D — Torre del Destino y Automatización
-*Objetivo: el endgame infinito con Paradas cada 5 pisos y la rama Estratega.*
+*Objetivo: el endgame infinito con Paradas cada 10 pisos (desde el 5) y la rama Estratega.*
 
-* [ ] **Modo Torre** (Infinito) con Paradas cada 5 pisos, Mini-Bosses cada 10, Grandes Bosses cada 50 pisos y registro de récord local (§9.9).
+* [ ] **Modo Torre** (Infinito) con Paradas cada 10 pisos (5, 15, 25…), Mini-Bosses cada 10, Grandes Bosses cada 50 pisos y registro de récord local (§9.9).
 * [ ] **Terrenos** (4, con *Terreno Herboso* otorgando `-20% daño recibido`) en pisos de jefe y en la Torre (§9.3.3) y **Mutadores** por década (con *Suelo Volcánico* drenando al Pokémon activo, §9.9).
 * [ ] **Árbol de Runas funcional** (gasto de Runas como moneda en ramas Entrenador, Estratega y Explorador) incluyendo el **Relevo Automático Táctico** con su nivel inicial de **Retirada por HP bajo** (§4.3, §9.8).
 
 **Criterios de aceptación:**
-1. Pisos > 100 jugables sin cambios de código entre pisos (todo es dato: bioma cíclico, paradas cada 5, mutadores por década).
+1. Pisos > 100 jugables sin cambios de código entre pisos (todo es dato: bioma cíclico, paradas cada 10 desde el 5, mutadores por década).
 2. El relevo automático no oscila (≥6 s de permanencia mínima, histéresis del +25%, salvo retirada de emergencia por HP crítico) y rinde claramente peor que un jugador atento en un jefe multifase.
 
 ---
@@ -619,7 +619,7 @@ export interface PokemonDefinition {
 
 | Idea | Veredicto | Fase | Qué cambia respecto a la idea original |
 | :--- | :--- | :--- | :--- |
-| **Vidas individuales y Paradas (v2.5)** | **Sí, núcleo de supervivencia.** Sustituye al Bastión global y a `UP_HP`/`UP_WALL`. | **3A (`3A.2-V/P/S`)** | Cero curas fuera de paradas (se reconvierten `BASTION_REGEN`, Planta, Hada y Herboso); `maxHp` sube con el Nivel de Equipo; menú fijo de 3 servicios cada 5 pisos. |
+| **Vidas individuales y Paradas (v2.5)** | **Sí, núcleo de supervivencia.** Sustituye al Bastión global y a `UP_HP`/`UP_WALL`. | **3A (`3A.2-V/P/S`)** | Cero curas fuera de paradas (se reconvierten `BASTION_REGEN`, Planta, Hada y Herboso); `maxHp` sube con el Nivel de Equipo; menú fijo de 3 servicios cada 10 pisos (desde el 5: 5, 15, 25…). |
 | Fondos temáticos (arena + web) | **Sí, pero procedurales.** PMDCollab **no sirve** para terrenos (§9.2.1). | 3A *(completado)* | Se genera el fondo por código con paleta y decorado por bioma; el tema de la web cuelga de las mismas variables. |
 | Climas y Terrenos de piso | **Sí, pero fusionados con los Mutadores en un único sistema.** Clima primero, terreno después. | 3B (clima) · 3D (terreno) | El PRD ya tenía "Mutadores de Piso"; son la misma palanca. Se evita construir dos sistemas con la misma tubería. |
 | Sinergias por tipo | **Sí, rediseñadas y sin curación.** | 3B | Solo cuentan Pokémon **vivos**; no duplican la `BENCH_PASSIVE` ni curan fuera de paradas. |
@@ -695,8 +695,8 @@ Ver §7.4. `sync:pokemon` incluye además los sprites de **Chansey (`0113`)** y 
 * Con la llegada de **Vitalidad Individual y Paradas** (D6–D19) y la **eliminación de `UP_HP` y `UP_WALL`**, calibrar contra el antiguo Bastión sería trabajo tirado. Por ello, el simulador pasa directamente a su **versión v3 (`3A.2-S`)** una vez implementados `3A.2-V` y `3A.2-P`.
 
 **Riesgo n.º 1 a evitar en la calibración — El "Carry Único":**
-* Si `HEAL_ONE` es demasiado barato y el daño esperado de un bloque de 5 pisos cabe entero en la barra de un solo Pokémon, relevar no compensa y los otros 5 Pokémon se vuelven decorado.
-* **Invariante anti-carry:** El daño esperado por bloque de 5 pisos (en la frontera donde el jugador abate ≥70% de la oleada y sufre ~30% de fugas) se calibra en torno a **1,2–1,6× el `maxHp` del Pokémon medio** de ese piso, forzando al jugador a repartir el desgaste mediante relevos o a usar `HEAL_TEAM` / `REVIVE_ONE`.
+* Si `HEAL_ONE` es demasiado barato y el daño esperado de un bloque de 10 pisos entre Paradas cabe entero en la barra de un solo Pokémon, relevar no compensa y los otros 5 Pokémon se vuelven decorado.
+* **Invariante anti-carry:** El daño esperado por bloque de 10 pisos entre Paradas (en la frontera donde el jugador abate ≥70% de la oleada y sufre ~30% de fugas) se calibra en torno a **1,2–1,6× el `maxHp` del Pokémon medio** de ese piso, forzando al jugador a repartir el desgaste mediante relevos o a usar `HEAL_TEAM` / `REVIVE_ONE`.
 
 **Políticas de bot del Simulador v3:**
 * **Políticas de Parada:**
@@ -712,7 +712,7 @@ Ver §7.4. `sync:pokemon` incluye además los sprites de **Chansey (`0113`)** y 
 1. **La Parada importa:** `SMART` supera a `NO_SHOP` en piso mediano y en jefes abatidos con un margen **≥ 15%** *(ajustable)* en los perfiles intermedio y máximo, y `SMART` obtiene un resultado $\ge$ cualquier política fija (`HEAL_FIRST`, `REVIVE_FIRST`).
 2. **Anti carry único:** Con el mismo presupuesto de equipo y mejoras, `CARRY` queda **≥ 15% por debajo** de `ROTATE` en piso mediano.
 3. **Presión sana por bloque:** En el perfil intermedio, el equipo llega a cada Parada con un HP medio del **40–70%** y **≤ 1 Pokémon debilitado** en la mayoría de paradas; un perfil pasivo (que no releva a tiempo) llega con ≥ 2 debilitados.
-4. **Sin espiral de muerte irreversible:** Tras sufrir el primer KO de la run, la probabilidad de terminar en `GAME_OVER` durante los **2 bloques de 5 pisos siguientes** es **≤ 60%** *(ajustable)* en el perfil intermedio.
+4. **Sin espiral de muerte irreversible:** Tras sufrir el primer KO de la run, la probabilidad de terminar en `GAME_OVER` durante los **2 bloques siguientes** es **≤ 60%** *(ajustable)* en el perfil intermedio.
 5. **Hitos objetivo por perfil (medidos por *Piso de Combate Efectivo* = ≥70% bajas y jefes previos abatidos):**
 
 | Perfil en Simulador (`pnpm run test:balance` v3) | Hito objetivo (bajas ≥70% + jefes abatidos) |
@@ -996,7 +996,7 @@ Para que no sea un trampolín a la oscilación ni sustituya al jugador:
 ### 9.9. Torre del Destino y Mutadores (Fase 3D)
 
 * **Desbloqueo:** primera victoria sobre el piso 100 de Campaña. En la Torre la run **no se detiene** en el piso 100 (pregunta P2, §9.10).
-* **Paradas y Jefes:** **Parada cada 5 pisos**; Mini-Boss cada 10 pisos; Gran Boss **cada 50** (50, 100, 150, 200…).
+* **Paradas y Jefes:** **Parada cada 10 pisos desde el piso 5 (`5, 15, 25…`)**; Mini-Boss cada 10 pisos; Gran Boss **cada 50** (50, 100, 150, 200…).
 * **Mutadores:** conjunto activo que **se sustituye** cada década (pisos 101, 111, 121…) y crece en número: 1 mutador (101–150), 2 (151–250), 3 (251+). Se eligen con el canal `SPECIAL` sin repetir ni combinar incompatibles (Resistencia Extrema + Inversión).
 
 | Mutador | Efecto |
@@ -1018,9 +1018,9 @@ Para que no sea un trampolín a la oscilación ni sustituya al jugador:
 
 | Riesgo | Impacto | Mitigación |
 | :--- | :--- | :--- |
-| **"Carry único"** (un solo Pokémon tanquea todo y se cura en cada Parada; los otros 5 son decorado) | **Crítico (invalidaría el sistema)** | Calibrar el daño esperado por bloque de 5 pisos ≈ **1,2–1,6× el `maxHp` del Pokémon medio**; precios de cura proporcionales a la fracción restaurada; criterio n.º 2 del Simulador v3 (`CARRY` ≥ 15% por debajo de `ROTATE`, §9.1.5). |
+| **"Carry único"** (un solo Pokémon tanquea todo y se cura en cada Parada; los otros 5 son decorado) | **Crítico (invalidaría el sistema)** | Calibrar el daño esperado por bloque de 10 pisos entre Paradas ≈ **1,2–1,6× el `maxHp` del Pokémon medio**; precios de cura proporcionales a la fracción restaurada; criterio n.º 2 del Simulador v3 (`CARRY` ≥ 15% por debajo de `ROTATE`, §9.1.5). |
 | **Espiral de muerte irreversible** (un KO apaga pasivas/sinergias ⇒ menos DPS ⇒ más fugas ⇒ más KO) | Alto | `REVIVE_ONE` siempre presente en el menú fijo de cada Parada; devuelve 50% de HP; precio escalado (`×1,25`) pero finito; criterio n.º 4 del Simulador v3 (≤ 60% de fin de run en los 2 bloques tras el primer KO). |
-| **Fricción con la identidad Idle** (pausa cada 5 pisos) | Medio | Pausa limpia sin temporizador ni pérdida offline; auto-omisión automática si nadie está herido ni debilitado (D11). Si en playtest se siente demasiado frecuente, ajustar `SHOP_EVERY_N_FLOORS`. |
+| **Fricción con la identidad Idle** (pausa cada 10 pisos desde el 5) | Bajo | Al ocurrir cada 10 pisos (`5, 15, 25…`), la pausa es poco frecuente, sin temporizador ni pérdida offline, y se auto-omite si nadie está herido ni debilitado (D11). |
 | **Pérdida de lectura de "una sola barra"** | Bajo | En `GameHUD`, además de la barra del activo, se muestra la **Reserva del equipo** (`Σ hp / Σ maxHp` y `N/M vivos`, §3.3). |
 | **Dureza en la primera run (1 Pokémon)** | Bajo | Colchón inicial de HP para equipo de 1 Pokémon (§4.4.1) + primera Parada antes del piso 5 + nodo *Aguante* en backlog. |
 | Suma de modificadores desbordada | Rompe balance y validación | Pipeline con topes por categoría (§9.3.1). |
@@ -1046,7 +1046,7 @@ Para que no sea un trampolín a la oscilación ni sustituya al jugador:
 | **D8** | **¿El daño recibido usa efectividad de tipos?** | **Confirmado (Sí)** — `getEffectiveness(tipos enemigo, tipos activo)` con `IMMUNITY_FLOOR = 0.25`. |
 | **D9** | **¿Qué ocurre cuando un Pokémon cae Debilitado (`hp ≤ 0`)?** | **Confirmado (Fuera de juego + apaga pasivas y sinergias)** — No recibe daño, no puede relevar y **su `BENCH_PASSIVE` y su aporte a Sinergias de Tipo se apagan por completo** (`FAINTED_PASSIVE_FACTOR = 0`) hasta ser revivido. Conserva el Nivel de Equipo común. |
 | **D10** | **¿Existen curas fuera de las Paradas?** | **Confirmado (No — Cero curas fuera de paradas)** — Se elimina toda regeneración pasiva. `BASTION_REGEN` en Mudkip (+12%) y Snorlax (+20%) pasa a `MAX_HP`; Planta (2/4), Hada (2) y Terreno Herboso se reconvierten a `MAX_HP`, debilitación de daño enemigo y escudos/mitigación. |
-| **D11** | **¿Cuándo ocurren las Paradas y cómo afectan al flujo?** | **Confirmado (Cada 5 pisos, bloqueando la run)** — Antes de cada piso múltiplo de 5 (5, 10, 15…), pausa total sin límite de tiempo hasta elegir servicio o *Seguir*. Se auto-omite si nadie está herido ni debilitado. |
+| **D11** | **¿Cuándo ocurren las Paradas y cómo afectan al flujo?** | **Confirmado (Cada 10 pisos desde el piso 5, bloqueando la run)** — Antes de los pisos `5, 15, 25, 35…` (`SHOP_FIRST_FLOOR = 5`, `SHOP_EVERY_N_FLOORS = 10`, condición `f >= 5 && (f - 5) % 10 === 0`), pausa total sin límite de tiempo hasta elegir servicio o *Seguir*. Se auto-omite si nadie está herido ni debilitado. |
 | **D12** | **¿Qué servicios ofrece cada Parada?** | **Confirmado (Menú fijo de 3 servicios; se elige 1 acción)** — `HEAL_ONE` (1 vivo al 100%), `HEAL_TEAM` (vivos +40% HP) y `REVIVE_ONE` (1 debilitado al 50% HP). |
 | **D13** | **¿Cómo se fijan los precios de la Parada?** | **Confirmado (En ingresos de oleada $W(\text{piso})$ y escalado de revivir)** — $W = 10 \times \text{enemyGoldValue}(\text{piso})$; curas a $1,0 W$ proporcional a la fracción restaurada; revivir a $2,5 W \times 1,25^{\text{revivesUsed}}$. |
 | **D14** | **¿Con cuánta vida vuelve un Pokémon revivido?** | **Confirmado (50% de `maxHp`)** — Canon de la saga y mantiene el peso de morir. |
@@ -1106,8 +1106,8 @@ Auditoría hecha leyendo el código y ejecutando el núcleo real con `docs/analy
 | Cabecera, §1, §2 | **El equipo es la defensa (D6):** desaparece la barra global del Bastión (`bastionHp/bastionMaxHp`); cada Pokémon tiene vida individual, puede caer debilitado y la run termina en `teamWiped`. Añadido el dilema de oro entre potencia y supervivencia en **Paradas de Ruta**. |
 | §3.1, §4.4.3, §9.4 | **Penalización de Debilitado (D9) y cero curas en combate (D10):** un Pokémon debilitado (`alive = false`) no puede relevar y **apaga al 100% su `BENCH_PASSIVE` y su aporte a Sinergias de Tipo**. Prohibida toda curación fuera de Paradas. |
 | §3.2, §4.1 | **Eliminación de `UP_HP` y `UP_WALL` (D15 confirmada) y sincronización con `89abb76`:** el `maxHp` de los Pokémon sube exclusivamente con el **Nivel de Equipo** (conservando el ratio `hp/maxHp`), su evolución (`hpFactor` de PokeAPI en `[0,6 ; 1,8]`) y bonos `MAX_HP`. Quedan **7 mejoras con oro** (`UP_ARROW`, `UP_SPD`, `UP_MULTI`, `UP_CRIT`, `UP_CDMG`, `UP_GOLD`, `UP_AUTOCLICK`). |
-| §3.3, §4.2 | **HUD, Relevo Forzado (D16) y Cementerio (D17):** `GameHUD` muestra la barra del activo + **Reserva del equipo** (`Σ hp / Σ maxHp`, `N/M vivos`) + chip de próxima parada. Caer debilitado dispara **Relevo Forzado** al mejor candidato vivo (`swapScore` + Ataque de Entrada). Añadido **Cementerio** (`faintLog`) en la Ficha de Entrenador. |
-| **§4.4 *(nueva)*** | **Especificación completa de Vitalidad Individual y Paradas de Ruta:** fórmulas de `maxHp` y daño recibido con efectividad de tipos (D7, D8), paradas cada 5 pisos que bloquean la run (D11), **menú fijo de 3 servicios con 1 acción por parada** (`HEAL_ONE` al 100%, `HEAL_TEAM` +40%, `REVIVE_ONE` al 50% con precio $2,5 W \times 1,25^{\text{revivesUsed}}$, D12–D14), **Informe de Ruta** (`previewWave`, D18) con Chansey (`0113`) y contratos TypeScript. |
+| §3.3, §4.2 | **HUD, Relevo Forzado (D16) y Cementerio (D17):** `GameHUD` muestra la barra del activo + **Reserva del equipo** (`Σ hp / Σ maxHp`, `N/M vivos`) + chip de próxima parada (`5, 15, 25…`). Caer debilitado dispara **Relevo Forzado** al mejor candidato vivo (`swapScore` + Ataque de Entrada). Añadido **Cementerio** (`faintLog`) en la Ficha de Entrenador. |
+| **§4.4 *(nueva)*** | **Especificación completa de Vitalidad Individual y Paradas de Ruta:** fórmulas de `maxHp` y daño recibido con efectividad de tipos (D7, D8), paradas cada 10 pisos desde el piso 5 (`5, 15, 25…`, `SHOP_FIRST_FLOOR = 5`, `SHOP_EVERY_N_FLOORS = 10`) que bloquean la run (D11), **menú fijo de 3 servicios con 1 acción por parada** (`HEAL_ONE` al 100%, `HEAL_TEAM` +40%, `REVIVE_ONE` al 50% con precio $2,5 W \times 1,25^{\text{revivesUsed}}$, D12–D14), **Informe de Ruta** (`previewWave`, D18) con Chansey (`0113`) y contratos TypeScript. |
 | §6.3, §7.1, §7.2 | **`RunProof` y Pipeline de Datos (D19):** añadido `shop_log` y `faint_count` a `RunProof`; añadido `baseStats.hp` en `PokemonDefinition`; sustituida la pasiva `BASTION_REGEN` de **Mudkip** (`+12%`) y **Snorlax** (`+20%`) por `MAX_HP`; incluidos Chansey (`0113`) y Kecleon (`0352`) en `sync:pokemon`. |
 | §8, §9.1.5 | **Roadmap 3A actualizado (`89abb76` + bloques `3A.2-V`, `3A.2-P`, `3A.2-S`) y Simulador v3:** marcados como completados `3A.1`, `3A.3` y `3A.4`; definidos los 7 criterios de aceptación del Simulador v3 (bots `SMART`, `NO_SHOP`, `CARRY`, `ROTATE`, invariante anti-carry único) y el backlog con puerta de entrada en Fase 5. |
 | §9.3, §9.4, §9.8, §9.9, §9.10 | **Reconversión de Terreno Herboso, Sinergias Planta/Hada y Suelo Volcánico:** *Terreno Herboso* pasa a `-20% daño recibido`; *Planta (2/4)* pasa a `+15% HP máx.` y `-20% daño enemigo por impacto`; *Hada (2)* pasa a escudo temporal en relevo; `swapScore` incorpora defensa y salud; *Suelo Volcánico* drena al activo; añadidas D6–D19 en §9.10 y Anexo A.3. |

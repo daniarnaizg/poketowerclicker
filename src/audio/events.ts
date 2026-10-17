@@ -49,7 +49,9 @@ export function detectAudioEvents(prev: GameState | null, next: GameState): Audi
   const kills = next.runStats.totalKills - prev.runStats.totalKills;
   if (kills > 0) out.push({ type: 'kill', count: kills });
 
-  if (next.bastionHp < prev.bastionHp) out.push({ type: 'hurt' });
+  const sumTeamHp = (s: GameState) =>
+    s.team.reduce((acc, sl) => acc + (sl.pokemon?.hp ?? 0), 0);
+  if (sumTeamHp(next) < sumTeamHp(prev)) out.push({ type: 'hurt' });
 
   const seen = new Set((prev.effects ?? []).map((fx) => fx.id));
   if ((next.effects ?? []).some((fx) => !seen.has(fx.id) && fx.kind !== 'RING')) out.push({ type: 'ultimate' });

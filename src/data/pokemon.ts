@@ -13,7 +13,7 @@ export const POKEDEX: Readonly<Record<string, PokemonDefinition>> = Object.freez
   '0004': {
     id: '0004', name: 'Charmander', generation: 1,
     types: [PokemonType.Fire],
-    baseStats: { atk: 12, spd: 1.25, critRate: 0.05, critDmg: 1.5 },
+    baseStats: { hp: 39, atk: 12, spd: 1.25, critRate: 0.05, critDmg: 1.5 },
     pattern: AttackPattern.SNIPER,
     evolution: { targetId: '0005', canonicalLevel: 16 },
     ultimate: { id: 'flamethrower', name: 'Llamarada', cooldownSec: 30 },
@@ -22,7 +22,7 @@ export const POKEDEX: Readonly<Record<string, PokemonDefinition>> = Object.freez
   '0005': {
     id: '0005', name: 'Charmeleon', generation: 1,
     types: [PokemonType.Fire],
-    baseStats: { atk: 20, spd: 1.3, critRate: 0.06, critDmg: 1.55 },
+    baseStats: { hp: 58, atk: 20, spd: 1.3, critRate: 0.06, critDmg: 1.55 },
     pattern: AttackPattern.SNIPER,
     evolution: { targetId: '0006', canonicalLevel: 36 },
     ultimate: { id: 'flamethrower', name: 'Llamarada', cooldownSec: 26 },
@@ -31,7 +31,7 @@ export const POKEDEX: Readonly<Record<string, PokemonDefinition>> = Object.freez
   '0006': {
     id: '0006', name: 'Charizard', generation: 1,
     types: [PokemonType.Fire, PokemonType.Flying],
-    baseStats: { atk: 32, spd: 1.2, critRate: 0.07, critDmg: 1.6 },
+    baseStats: { hp: 78, atk: 32, spd: 1.2, critRate: 0.07, critDmg: 1.6 },
     pattern: AttackPattern.AOE,
     ultimate: { id: 'fire_blast', name: 'Llamarada', cooldownSec: 22 },
     benchPassive: { stat: 'FIRE_DAMAGE', value: 0.16 },
@@ -41,7 +41,7 @@ export const POKEDEX: Readonly<Record<string, PokemonDefinition>> = Object.freez
   '0007': {
     id: '0007', name: 'Squirtle', generation: 1,
     types: [PokemonType.Water],
-    baseStats: { atk: 11, spd: 1.2, critRate: 0.05, critDmg: 1.5 },
+    baseStats: { hp: 44, atk: 11, spd: 1.2, critRate: 0.05, critDmg: 1.5 },
     pattern: AttackPattern.SNIPER,
     evolution: { targetId: '0008', canonicalLevel: 16 },
     ultimate: { id: 'water_gun', name: 'Hidrobomba', cooldownSec: 30 },
@@ -50,7 +50,7 @@ export const POKEDEX: Readonly<Record<string, PokemonDefinition>> = Object.freez
   '0008': {
     id: '0008', name: 'Wartortle', generation: 1,
     types: [PokemonType.Water],
-    baseStats: { atk: 18, spd: 1.05, critRate: 0.06, critDmg: 1.55 },
+    baseStats: { hp: 59, atk: 18, spd: 1.05, critRate: 0.06, critDmg: 1.55 },
     pattern: AttackPattern.SNIPER,
     evolution: { targetId: '0009', canonicalLevel: 36 },
     ultimate: { id: 'water_gun', name: 'Hidrobomba', cooldownSec: 26 },
@@ -59,7 +59,7 @@ export const POKEDEX: Readonly<Record<string, PokemonDefinition>> = Object.freez
   '0009': {
     id: '0009', name: 'Blastoise', generation: 1,
     types: [PokemonType.Water],
-    baseStats: { atk: 30, spd: 0.85, critRate: 0.06, critDmg: 1.6 },
+    baseStats: { hp: 79, atk: 30, spd: 0.85, critRate: 0.06, critDmg: 1.6 },
     pattern: AttackPattern.AOE,
     ultimate: { id: 'hydro_pump', name: 'Hidrobomba', cooldownSec: 22 },
     benchPassive: { stat: 'WATER_DAMAGE', value: 0.16 },
@@ -69,7 +69,7 @@ export const POKEDEX: Readonly<Record<string, PokemonDefinition>> = Object.freez
   '0001': {
     id: '0001', name: 'Bulbasaur', generation: 1,
     types: [PokemonType.Grass, PokemonType.Poison],
-    baseStats: { atk: 10, spd: 1.15, critRate: 0.05, critDmg: 1.5 },
+    baseStats: { hp: 45, atk: 10, spd: 1.15, critRate: 0.05, critDmg: 1.5 },
     pattern: AttackPattern.PULSE,
     evolution: { targetId: '0002', canonicalLevel: 16 },
     ultimate: { id: 'vine_whip', name: 'Tormenta Floral', cooldownSec: 30 },
@@ -78,7 +78,7 @@ export const POKEDEX: Readonly<Record<string, PokemonDefinition>> = Object.freez
   '0002': {
     id: '0002', name: 'Ivysaur', generation: 1,
     types: [PokemonType.Grass, PokemonType.Poison],
-    baseStats: { atk: 17, spd: 1.2, critRate: 0.06, critDmg: 1.55 },
+    baseStats: { hp: 60, atk: 17, spd: 1.2, critRate: 0.06, critDmg: 1.55 },
     pattern: AttackPattern.PULSE,
     evolution: { targetId: '0003', canonicalLevel: 36 },
     ultimate: { id: 'vine_whip', name: 'Tormenta Floral', cooldownSec: 26 },
@@ -87,7 +87,7 @@ export const POKEDEX: Readonly<Record<string, PokemonDefinition>> = Object.freez
   '0003': {
     id: '0003', name: 'Venusaur', generation: 1,
     types: [PokemonType.Grass, PokemonType.Poison],
-    baseStats: { atk: 28, spd: 1.1, critRate: 0.06, critDmg: 1.6 },
+    baseStats: { hp: 80, atk: 28, spd: 1.1, critRate: 0.06, critDmg: 1.6 },
     pattern: AttackPattern.AOE,
     ultimate: { id: 'solar_beam', name: 'Tormenta Floral', cooldownSec: 22 },
     benchPassive: { stat: 'GRASS_DAMAGE', value: 0.16 },
