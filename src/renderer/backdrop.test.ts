@@ -105,7 +105,8 @@ describe('backdrop and biome routing (Block 3A.4)', () => {
       expect(canvas.width).toBe(384);
       expect(canvas.height).toBe(384);
       expect(mockCanvas._ctx.fillRect).toHaveBeenCalled();
-      expect(mockCanvas._ctx.setLineDash).toHaveBeenCalledWith([6, 6]);
+      // El terreno es continuo: un único fillRect de base a pantalla completa, sin teselas.
+      expect(mockCanvas._ctx.fillRect).toHaveBeenCalledWith(0, 0, 384, 384);
     } finally {
       if (originalCreateElement) {
         (globalThis as any).document.createElement = originalCreateElement;

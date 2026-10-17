@@ -192,6 +192,45 @@ function drawStatusPips(ctx: CanvasRenderingContext2D, enemy: Enemy, y: number):
   });
 }
 
+/**
+ * Estallido de clic / cambio de Pokémon al estilo Pokémon: anillo de cuadraditos
+ * pixel-art (con contorno) que se expande girando un poco + chispa de 4 puntas
+ * en el centro. Sin trazos suaves: todo en píxeles enteros.
+ */
+function drawPixelRing(ctx: CanvasRenderingContext2D, fx: VisualEffect, t: number, color: string): void {
+  const fade = Math.max(0, 1 - t);
+  const finalR = fx.radius ?? 14;
+  const ease = 1 - (1 - t) * (1 - t);
+  const r = finalR * (0.3 + 0.7 * ease);
+  const n = Math.max(8, Math.min(24, Math.round(finalR * 0.8)));
+  const size = finalR > 30 ? 4 : 3;
+  const spin = t * 0.9;
+  ctx.globalAlpha = Math.min(1, fade * 1.4);
+  for (let i = 0; i < n; i++) {
+    const a = (i / n) * FULL_CIRCLE + spin;
+    const px = Math.round(fx.x + Math.cos(a) * r - size / 2);
+    const py = Math.round(fx.y + Math.sin(a) * r - size / 2);
+    ctx.fillStyle = INK;
+    ctx.fillRect(px - 1, py - 1, size + 2, size + 2);
+    ctx.fillStyle = i % 2 === 0 ? color : '#ffffff';
+    ctx.fillRect(px, py, size, size);
+  }
+  // Chispa central de 4 puntas que se encoge.
+  if (t < 0.75) {
+    const arm = Math.max(1, Math.round((finalR > 30 ? 9 : 6) * (1 - t)));
+    const cx = Math.round(fx.x);
+    const cy = Math.round(fx.y);
+    ctx.fillStyle = INK;
+    ctx.fillRect(cx - arm - 1, cy - 2, arm * 2 + 3, 4);
+    ctx.fillRect(cx - 2, cy - arm - 1, 4, arm * 2 + 3);
+    ctx.fillStyle = '#fff6c0';
+    ctx.fillRect(cx - arm, cy - 1, arm * 2 + 1, 2);
+    ctx.fillRect(cx - 1, cy - arm, 2, arm * 2 + 1);
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(cx - 1, cy - 1, 2, 2);
+  }
+}
+
 /** Ultimate beams / novas / flashes and switch-in rings; fades out with age. */
 export function renderEffects(ctx: CanvasRenderingContext2D, effects: readonly VisualEffect[]): void {
   for (const fx of effects) {
@@ -216,8 +255,10 @@ export function renderEffects(ctx: CanvasRenderingContext2D, effects: readonly V
       ctx.globalAlpha = 0.45 * fade;
       ctx.fillStyle = color;
       ctx.fillRect(0, 0, ARENA.SIZE, ARENA.SIZE);
+    } else if (fx.kind === 'RING') {
+      drawPixelRing(ctx, fx, t, color);
     } else {
-      // NOVA / RING: expanding circle.
+      // NOVA: expanding circle.
       const radius = (fx.radius ?? 60) * (1 - (1 - t) * (1 - t));
       ctx.globalAlpha = (fx.kind === 'NOVA' ? 0.25 : 0.12) * fade;
       ctx.fillStyle = color;
