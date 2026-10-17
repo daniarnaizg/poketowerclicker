@@ -28,12 +28,82 @@ interface Stage {
   types: Types;
   atk: number;
   spd: number;
+  /** Canonical base HP override (defaults to BASE_HP_BY_ID lookup). */
+  hp?: number;
   /** Generation of this specific species when it differs from the line's. */
   gen?: number;
   /** Pattern / ultimate overrides for this stage (e.g. final forms). */
   pattern?: AttackPattern;
   ult?: string;
 }
+
+/** Canonical base HP (PokeAPI) for species in the roster and potential additions. */
+export const BASE_HP_BY_ID: Record<string, number> = {
+  // Starters (Gen 1)
+  '0001': 45, '0002': 60, '0003': 80,
+  '0004': 39, '0005': 58, '0006': 78,
+  '0007': 44, '0008': 59, '0009': 79,
+
+  // Common (★)
+  '0010': 45, '0011': 50, '0012': 60, // Caterpie, Metapod, Butterfree
+  '0013': 40, '0014': 45, '0015': 65, // Weedle, Kakuna, Beedrill
+  '0016': 40, '0017': 63, '0018': 83, // Pidgey, Pidgeotto, Pidgeot
+  '0019': 30, '0020': 55,             // Rattata, Raticate
+  '0025': 35, '0026': 60,             // Pikachu, Raichu
+  '0041': 40, '0042': 75,             // Zubat, Golbat
+  '0043': 45, '0044': 60, '0045': 75, // Oddish, Gloom, Vileplume
+  '0052': 40, '0053': 65,             // Meowth, Persian
+  '0054': 50, '0055': 80,             // Psyduck, Golduck
+  '0058': 55, '0059': 90,             // Growlithe, Arcanine
+  '0063': 25, '0064': 40, '0065': 55, // Abra, Kadabra, Alakazam
+  '0066': 70, '0067': 80, '0068': 90, // Machop, Machoke, Machamp
+  '0074': 40, '0075': 55, '0076': 80, // Geodude, Graveler, Golem
+  '0077': 50, '0078': 65,             // Ponyta, Rapidash
+  '0081': 25, '0082': 50,             // Magnemite, Magneton
+  '0092': 30, '0093': 45, '0094': 60, // Gastly, Haunter, Gengar
+  '0095': 35,                         // Onix
+  '0111': 80, '0112': 105,            // Rhyhorn, Rhydon
+  '0116': 30, '0117': 55,             // Horsea, Seadra
+  '0120': 30, '0121': 60,             // Staryu, Starmie
+  '0123': 70,                         // Scyther
+  '0125': 65,                         // Electabuzz
+  '0126': 65,                         // Magmar
+  '0127': 65,                         // Pinsir
+  '0129': 20, '0130': 95,             // Magikarp, Gyarados
+  '0133': 55,                         // Eevee
+  '0134': 130, '0135': 65, '0136': 65,// Vaporeon, Jolteon, Flareon
+  '0137': 65,                         // Porygon
+
+  // Rare (★★) & Starters Gen 2-3
+  '0152': 45, '0153': 60, '0154': 80, // Chikorita, Bayleef, Meganium
+  '0155': 39, '0156': 58, '0157': 78, // Cyndaquil, Quilava, Typhlosion
+  '0158': 50, '0159': 65, '0160': 85, // Totodile, Croconaw, Feraligatr
+  '0179': 55, '0180': 70, '0181': 90, // Mareep, Flaaffy, Ampharos
+  '0183': 70, '0184': 100,            // Marill, Azumarill
+  '0228': 45, '0229': 75,             // Houndour, Houndoom
+  '0240': 45,                         // Magby
+  '0252': 40, '0253': 50, '0254': 70, // Treecko, Grovyle, Sceptile
+  '0255': 45, '0256': 60, '0257': 80, // Torchic, Combusken, Blaziken
+  '0258': 50, '0259': 70, '0260': 100,// Mudkip, Marshtomp, Swampert
+  '0280': 28, '0281': 38, '0282': 68, // Ralts, Kirlia, Gardevoir
+  '0304': 50, '0305': 60, '0306': 70, // Aron, Lairon, Aggron
+  '0328': 45, '0329': 50, '0330': 80, // Trapinch, Vibrava, Flygon
+  '0447': 40, '0448': 70,             // Riolu, Lucario
+  '0467': 75,                         // Magmortar
+
+  // Epic (★★★)
+  '0131': 130,                        // Lapras
+  '0143': 160,                        // Snorlax
+  '0147': 41, '0148': 61, '0149': 91, // Dratini, Dragonair, Dragonite
+  '0246': 50, '0247': 70, '0248': 100,// Larvitar, Pupitar, Tyranitar
+  '0374': 40, '0375': 60, '0376': 80, // Beldum, Metang, Metagross
+
+  // Legendary (★★★★)
+  '0144': 90,                         // Articuno
+  '0145': 90,                         // Zapdos
+  '0146': 90,                         // Moltres
+  '0150': 106,                        // Mewtwo
+};
 
 interface Line {
   gen: number;
@@ -64,12 +134,14 @@ function defineLine(line: Line): PokemonDefinition[] {
     const ult = ULTIMATES[ultId];
     if (!ult) throw new Error(`roster: unknown ultimate "${ultId}" for ${st.name}`);
     const ratio = n === 1 ? 1 : 0.5 + (0.5 * i) / (n - 1);
+    const hp = st.hp ?? BASE_HP_BY_ID[st.id] ?? ([50, 70, 95][i] ?? 70);
     return {
       id: st.id,
       name: st.name,
       generation: st.gen ?? line.gen,
       types: st.types,
       baseStats: {
+        hp,
         atk: st.atk,
         spd: st.spd,
         critRate: round((line.crit ?? 0.05) + 0.01 * i, 2),
@@ -213,7 +285,7 @@ const LINES: Line[] = [
     ],
   },
   { // Mudkip 16 / 36
-    gen: 3, pattern: P.PULSE, ult: 'water_gun', passive: ['BASTION_REGEN', 0.01], evoLevels: [16, 36],
+    gen: 3, pattern: P.PULSE, ult: 'water_gun', passive: ['MAX_HP', 0.12], evoLevels: [16, 36],
     stages: [
       { id: '0258', name: 'Mudkip', types: [T.Water], atk: 10, spd: 1.0 },
       { id: '0259', name: 'Marshtomp', types: [T.Water, T.Ground], atk: 18, spd: 1.0 },
@@ -251,7 +323,7 @@ const LINES: Line[] = [
     stages: [{ id: '0131', name: 'Lapras', types: [T.Water, T.Ice], atk: 27, spd: 0.9 }],
   },
   { // Snorlax (no evolution): slow cadence, massive damage
-    gen: 1, pattern: P.PULSE, ult: 'hyper_beam', passive: ['BASTION_REGEN', 0.02], evoLevels: [],
+    gen: 1, pattern: P.PULSE, ult: 'hyper_beam', passive: ['MAX_HP', 0.20], evoLevels: [],
     stages: [{ id: '0143', name: 'Snorlax', types: [T.Normal], atk: 38, spd: 0.5 }],
   },
 
@@ -278,3 +350,5 @@ const LINES: Line[] = [
 export const ROSTER: Readonly<Record<string, PokemonDefinition>> = Object.freeze(
   Object.fromEntries(LINES.flatMap(defineLine).map((d) => [d.id, d])),
 );
+
+export const ROSTER_DEFINITIONS = ROSTER;

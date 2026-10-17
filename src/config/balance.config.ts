@@ -29,8 +29,6 @@ export const IMMUNITY_FLOOR = 0.25;
 export const BOSS_ANCHOR_TICK_SEC = 1.0;
 /** Boss anchor damage per tick as a fraction of bastion max HP (Decision D1). */
 export const BOSS_ANCHOR_MAX_HP_FRACTION = 0.06;
-/** Normal enemy leak damage extra as a fraction of bastion max HP (Decision D2). */
-export const ENEMY_CONTACT_MAX_HP_FRACTION = 0.06;
 
 /** Boss timer duration in seconds by floor (PRD §5.1, Decision D1). */
 export function bossTimerForFloor(floor: number): number {
@@ -90,14 +88,47 @@ export const AUTO_SPD_BASE_MULT = 0.5;
 export const SPD_PER_LEVEL = 0.12;
 /** UP_GOLD: +10% gold per level. */
 export const GOLD_PER_LEVEL = 0.10;
-/** UP_HP: +25 max bastion HP per level. */
-export const HP_PER_LEVEL = 25;
-/** UP_WALL (Regeneración): +0.5% max HP/s regen per level. */
-export const REGEN_PER_LEVEL = 0.005;
-/** Alias for backward compatibility. */
-export const WALL_HP_PER_LEVEL = REGEN_PER_LEVEL;
-export const BASTION_BASE_HP = 130;
-export const BASTION_REGEN_FRACTION_PER_SEC = 0.01;
+
+/** Base HP at Team Level 1 for a species with hpFactor = 1.0 */
+export const HP_BASE = 100;
+/** Linear maxHp growth per Team Level above 1 (+10% per level) */
+export const HP_LEVEL_SCALE = 0.1;
+/** Extra maxHp cushion when the run team has only 1 Pokémon (matches legacy 130 HP bastion) */
+export const SOLO_STARTER_HP_MULT = 1.3;
+/** Base leak damage on Floor 1 before type effectiveness */
+export const LEAK_BASE_DAMAGE = 14;
+/** Exponential leak damage growth per floor */
+export const LEAK_FLOOR_SCALE = 1.05;
+/** Fainted Pokémon contribute 0% of bench passives and type synergies (D9) */
+export const FAINTED_PASSIVE_FACTOR = 0;
+/** First floor before which a Route Stop (Parada) opens */
+export const SHOP_FIRST_FLOOR = 5;
+/** Interval in floors between Route Stops (5, 15, 25, 35...) */
+export const SHOP_EVERY_N_FLOORS = 10;
+
+/** Leak damage dealt by a normal enemy on a given floor before type effectiveness */
+export function leakDamageForFloor(floor: number): number {
+  return Math.max(1, Math.round(LEAK_BASE_DAMAGE * Math.pow(LEAK_FLOOR_SCALE, Math.max(0, floor - 1))));
+}
+
+/** Maps a species canonical base HP (PokeAPI) into the [0.6, 1.8] hpFactor range */
+export function hpFactorForBaseStat(baseHp: number): number {
+  const normalized = 0.6 + ((baseHp - 30) / (160 - 30)) * 1.2;
+  return Math.min(1.8, Math.max(0.6, Math.round(normalized * 100) / 100));
+}
+
+/** True if a Route Stop triggers before starting `floor` (5, 15, 25, 35...) */
+export function isShopFloor(floor: number): boolean {
+  return floor >= SHOP_FIRST_FLOOR && (floor - SHOP_FIRST_FLOOR) % SHOP_EVERY_N_FLOORS === 0;
+}
+
+/** Next floor (≥ currentFloor) that will have a Route Stop (5 for 1..5, 15 for 6..15, etc.) */
+export function nextShopFloor(currentFloor: number): number {
+  if (currentFloor <= SHOP_FIRST_FLOOR) return SHOP_FIRST_FLOOR;
+  const steps = Math.ceil((currentFloor - SHOP_FIRST_FLOOR) / SHOP_EVERY_N_FLOORS);
+  return SHOP_FIRST_FLOOR + steps * SHOP_EVERY_N_FLOORS;
+}
+
 /** UP_MULTI: max upgrade level (4) and max simultaneous shots/bounces (5). */
 export const MULTI_MAX_LEVEL = 4;
 export const MULTI_MAX = 5;
@@ -122,9 +153,7 @@ const UPGRADE_BASE_COST: Record<BastionUpgradeId, number> = {
   UP_CRIT: 35,
   UP_CDMG: 40,
   UP_AUTOCLICK: 100,
-  UP_HP: 20,
   UP_GOLD: 50,
-  UP_WALL: 60,
 };
 
 export function upgradeMaxLevel(id: BastionUpgradeId): number | undefined {
@@ -322,7 +351,6 @@ export const BALANCE = Object.freeze({
   IMMUNITY_FLOOR,
   BOSS_ANCHOR_TICK_SEC,
   BOSS_ANCHOR_MAX_HP_FRACTION,
-  ENEMY_CONTACT_MAX_HP_FRACTION,
   bossTimerForFloor,
   WAVE_ENEMY_COUNT_BASE,
   BOSS_HP_MULTIPLIER,
@@ -338,11 +366,18 @@ export const BALANCE = Object.freeze({
   AUTO_SPD_BASE_MULT,
   SPD_PER_LEVEL,
   GOLD_PER_LEVEL,
-  HP_PER_LEVEL,
-  REGEN_PER_LEVEL,
-  WALL_HP_PER_LEVEL,
-  BASTION_BASE_HP,
-  BASTION_REGEN_FRACTION_PER_SEC,
+  HP_BASE,
+  HP_LEVEL_SCALE,
+  SOLO_STARTER_HP_MULT,
+  LEAK_BASE_DAMAGE,
+  LEAK_FLOOR_SCALE,
+  FAINTED_PASSIVE_FACTOR,
+  SHOP_FIRST_FLOOR,
+  SHOP_EVERY_N_FLOORS,
+  leakDamageForFloor,
+  hpFactorForBaseStat,
+  isShopFloor,
+  nextShopFloor,
   MULTI_MAX_LEVEL,
   MULTI_MAX,
   RUNE_DAMAGE_BONUS,

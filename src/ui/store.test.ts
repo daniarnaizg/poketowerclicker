@@ -10,17 +10,14 @@ function makeState(phase: GameState['phase']): GameState {
     team: [slot, slot, slot, slot, slot, slot],
     teamLevel: 1,
     gold: 0,
-    bastionHp: 100,
-    bastionMaxHp: 100,
     bastionUpgrades: {
-      UP_HP: 0,
-      UP_MULTI: 0,
       UP_ARROW: 0,
       UP_SPD: 0,
+      UP_MULTI: 0,
+      UP_AUTOCLICK: 0,
       UP_CRIT: 0,
       UP_CDMG: 0,
       UP_GOLD: 0,
-      UP_WALL: 0,
     },
     enemies: [],
     projectiles: [],
@@ -50,7 +47,7 @@ describe('useGameStore', () => {
     s.requestHotSwap(2);
     s.requestUltimate();
     s.requestClickAttack(10, 20);
-    s.purchaseUpgrade('UP_HP');
+    s.purchaseUpgrade('UP_ARROW');
     s.requestTeamLevelUp();
     s.requestStartNextWave();
     s.requestSetAutoAdvance(false);
@@ -60,7 +57,7 @@ describe('useGameStore', () => {
       hotSwapIndex: 2,
       useUltimate: true,
       click: { x: 10, y: 20 },
-      buyUpgrade: 'UP_HP',
+      buyUpgrade: 'UP_ARROW',
       buyTeamLevel: true,
       startNextWave: true,
       setAutoAdvance: false,

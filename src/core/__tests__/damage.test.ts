@@ -6,14 +6,13 @@ import { getStatMultiplier } from '../teamLevel';
 import { CRIT_CHANCE_CAP } from '../../config/balance.config';
 
 const NO_UPGRADES: BastionUpgrades = {
-  UP_HP: 0,
-  UP_MULTI: 0,
   UP_ARROW: 0,
   UP_SPD: 0,
+  UP_MULTI: 0,
+  UP_AUTOCLICK: 0,
   UP_CRIT: 0,
   UP_CDMG: 0,
   UP_GOLD: 0,
-  UP_WALL: 0,
 };
 
 const neverCrit = () => 0.999;

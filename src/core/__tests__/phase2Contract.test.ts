@@ -9,8 +9,10 @@ import { BURN_DPS_FACTOR } from '../../config/balance.config';
 import type { BastionUpgrades, Cooldowns6, Enemy, GameConfig, GameState, LoadoutEntry, Team6 } from '../types';
 import { PokemonType } from '../types';
 
+import { computeTeamBonuses } from '../passives';
+
 const config: GameConfig = { pokedex: POKEDEX, typeChart: TYPE_CHART, seed: 1 };
-const ZERO: BastionUpgrades = { UP_HP: 0, UP_MULTI: 0, UP_ARROW: 0, UP_SPD: 0, UP_CRIT: 0, UP_CDMG: 0, UP_GOLD: 0, UP_WALL: 0 };
+const ZERO: BastionUpgrades = { UP_ARROW: 0, UP_SPD: 0, UP_MULTI: 0, UP_AUTOCLICK: 0, UP_CRIT: 0, UP_CDMG: 0, UP_GOLD: 0 };
 
 function mulberry32(seed: number): () => number {
   let a = seed;
@@ -27,7 +29,7 @@ function menuState(): GameState {
   const empty = (index: number) => ({ index, pokemon: null, isActive: false, hotSwapCooldownSec: 0 });
   return {
     phase: 'MENU', floor: 1, team: [0, 1, 2, 3, 4, 5].map(empty) as Team6, teamLevel: 1, gold: 0,
-    bastionHp: 100, bastionMaxHp: 100, bastionUpgrades: { ...ZERO }, enemies: [], projectiles: [],
+    bastionUpgrades: { ...ZERO }, enemies: [], projectiles: [],
     floatingTexts: [], ultimateCharge: 0, ultimateMax: 0, waveEnemiesRemaining: 0,
     hotSwapCooldowns: [0, 0, 0, 0, 0, 0] as Cooldowns6,
     runStats: { totalKills: 0, totalGoldEarned: 0, totalDamageDealt: 0, damagePerSlot: [0, 0, 0, 0, 0, 0], mvpSlotIndex: -1, floorReached: 1, durationSec: 0 },
@@ -151,3 +153,22 @@ describe('contract tripwires', () => {
     expect(s.team[0].pokemon?.shinyActive).toBe(true);
   });
 });
+
+describe('MAX_HP bench passives (Block 3A.2-V)', () => {
+  it('Swampert and Snorlax provide MAX_HP and computeTeamBonuses aggregates bonuses.maxHp', () => {
+    expect(POKEDEX['0260'].benchPassive).toEqual({ stat: 'MAX_HP', value: 0.12 });
+    expect(POKEDEX['0143'].benchPassive).toEqual({ stat: 'MAX_HP', value: 0.20 });
+    const team = [
+      { index: 0, pokemon: { definitionId: '0004', stars: 1, hp: 100, maxHp: 100, alive: true } as any, isActive: true, hotSwapCooldownSec: 0 },
+      { index: 1, pokemon: { definitionId: '0260', stars: 2, hp: 100, maxHp: 100, alive: true } as any, isActive: false, hotSwapCooldownSec: 0 },
+      { index: 2, pokemon: { definitionId: '0143', stars: 2, hp: 100, maxHp: 100, alive: true } as any, isActive: false, hotSwapCooldownSec: 0 },
+      { index: 3, pokemon: null, isActive: false, hotSwapCooldownSec: 0 },
+      { index: 4, pokemon: null, isActive: false, hotSwapCooldownSec: 0 },
+      { index: 5, pokemon: null, isActive: false, hotSwapCooldownSec: 0 },
+    ];
+    const bonuses = computeTeamBonuses(team as any, POKEDEX);
+    expect(bonuses.maxHp).toBeCloseTo(0.32, 5);
+    expect((bonuses as any).bastionRegen).toBeUndefined();
+  });
+});
+

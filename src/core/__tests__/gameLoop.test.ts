@@ -8,29 +8,27 @@ import { ARENA } from '../../config/arena.config';
 import {
   BOSS_HP_MULTIPLIER,
   BOSS_TIMER_DURATION,
-  ENEMY_CONTACT_DAMAGE,
-  ENEMY_CONTACT_DAMAGE_FLOOR_SCALE,
-  ENEMY_CONTACT_MAX_HP_FRACTION,
   HOT_SWAP_COOLDOWN,
   INTER_WAVE_BREAK_SEC,
-  WALL_HP_PER_LEVEL,
+  LEAK_BASE_DAMAGE,
   WAVE_ENEMY_COUNT_BASE,
   enemyHp,
+  leakDamageForFloor,
 } from '../../config/balance.config';
 import { getEnemyDef } from '../../data/enemies';
 import type { BastionUpgrades, Cooldowns6, GameConfig, GameState, Team6 } from '../types';
+import { PokemonType } from '../types';
 
 const config: GameConfig = { pokedex: POKEDEX, typeChart: TYPE_CHART, seed: 42 };
 
 const ZERO_UPGRADES: BastionUpgrades = {
-  UP_HP: 0,
-  UP_MULTI: 0,
   UP_ARROW: 0,
   UP_SPD: 0,
+  UP_MULTI: 0,
+  UP_AUTOCLICK: 0,
   UP_CRIT: 0,
   UP_CDMG: 0,
   UP_GOLD: 0,
-  UP_WALL: 0,
 };
 
 /** Deterministic PRNG so runs are reproducible across calls. */
@@ -54,8 +52,6 @@ function emptyState(): GameState {
     team: [empty(0), empty(1), empty(2), empty(3), empty(4), empty(5)] as Team6,
     teamLevel: 1,
     gold: 0,
-    bastionHp: 100,
-    bastionMaxHp: 100,
     bastionUpgrades: { ...ZERO_UPGRADES },
     enemies: [],
     projectiles: [],
@@ -217,39 +213,43 @@ describe('tickGame', () => {
     const base = startingRun(21);
     // interWaveTimerSec is pre-set: a single tick starts the break in section 6,
     // which runs after regen, so the pause is only observable across ticks.
+    const activeBefore = base.team.find((s) => s.isActive)!.pokemon!;
     const inBreak: GameState = {
       ...base,
       enemies: [],
       waveEnemiesRemaining: 0,
-      bastionHp: 50,
       interWaveTimerSec: 1.5,
     };
     const next = tickGame(inBreak, {}, config, 16.7, mulberry32(22));
     expect(next.ultimateCharge).toBeGreaterThan(0);
-    expect(next.bastionHp).toBe(50);
+    const activeAfter = next.team.find((s) => s.isActive)!.pokemon!;
+    expect(activeAfter.hp).toBe(activeBefore.hp);
   });
 
-  it('scales contact damage with the floor (≈1.4x at floor 41 vs floor 1)', () => {
-    const bastionMaxHp = 10_000;
-    const baseContact = ENEMY_CONTACT_DAMAGE + bastionMaxHp * ENEMY_CONTACT_MAX_HP_FRACTION;
+  it('scales contact damage with the floor using leakDamageForFloor', () => {
     const leakDamage = (floor: number): number => {
       const base = startingRun(43);
-      const atCenter = { ...base.enemies[0], x: ARENA.CENTER, y: ARENA.CENTER };
+      const activeSlot = base.team.findIndex((s) => s.isActive);
+      const withLargeHp = base.team.map((s, idx) =>
+        idx === activeSlot && s.pokemon ? { ...s, pokemon: { ...s.pokemon, hp: 10_000, maxHp: 10_000 } } : s,
+      ) as Team6;
+      const atCenter = { ...base.enemies[0], x: ARENA.CENTER, y: ARENA.CENTER, types: [PokemonType.Normal] as [PokemonType] };
       const doomed: GameState = {
         ...base,
+        team: withLargeHp,
         floor,
-        bastionHp: bastionMaxHp,
-        bastionMaxHp,
         enemies: [atCenter],
         waveEnemiesRemaining: 1,
-        // Pause regen (breather) so the contact hit is not healed away within the tick.
         interWaveTimerSec: 1.5,
       };
-      return doomed.bastionHp - tickGame(doomed, {}, config, 16.7, mulberry32(44)).bastionHp;
+      const activeBefore = doomed.team[activeSlot].pokemon!.hp;
+      const after = tickGame(doomed, {}, config, 16.7, mulberry32(44));
+      const activeAfter = after.team[activeSlot].pokemon!.hp;
+      return activeBefore - activeAfter;
     };
-    expect(leakDamage(1)).toBeCloseTo(baseContact, 5);
-    expect(leakDamage(41)).toBeCloseTo(baseContact * (1 + 40 * ENEMY_CONTACT_DAMAGE_FLOOR_SCALE), 5);
-    expect(leakDamage(41)).toBeCloseTo(1.4 * leakDamage(1), 5);
+    expect(leakDamage(1)).toBe(leakDamageForFloor(1));
+    expect(leakDamage(41)).toBe(leakDamageForFloor(41));
+    expect(leakDamage(41)).toBeGreaterThan(leakDamage(1));
   });
 
   it('boss anchors at bastion perimeter instead of disappearing on contact (Decision D1)', () => {
@@ -268,8 +268,6 @@ describe('tickGame', () => {
     };
     const state: GameState = {
       ...base,
-      bastionHp: 500,
-      bastionMaxHp: 500,
       enemies: [bossEnemy],
       waveEnemiesRemaining: 1,
       interWaveTimerSec: 1.5,
@@ -279,28 +277,9 @@ describe('tickGame', () => {
     expect(next.enemies[0].alive).toBe(true);
     expect(next.enemies[0].anchoredAtBastion).toBe(true);
     expect(next.waveEnemiesRemaining).toBe(1);
-    expect(next.bastionHp).toBeLessThan(500); // took boss anchor strike damage
-  });
-
-  it('UP_WALL increments level, deducts gold, does not modify maxHp, and boosts passive regen', () => {
-    const base = startingRun(81);
-    const wallState: GameState = { ...base, gold: 1000, bastionMaxHp: 130, bastionHp: 50 };
-    const next = purchaseUpgrade(wallState, 'UP_WALL');
-    expect(next.bastionUpgrades.UP_WALL).toBe(1);
-    expect(next.bastionMaxHp).toBe(130);
-    expect(next.bastionHp).toBe(50);
-    expect(next.gold).toBe(1000 - calculateUpgradeCost('UP_WALL', 0));
-
-    // Passive regen per tick is higher with UP_WALL = 1 than UP_WALL = 0
-    const regenZero = tickGame(wallState, {}, config, 16.7, mulberry32(1)).bastionHp - wallState.bastionHp;
-    const regenOne = tickGame(next, {}, config, 16.7, mulberry32(1)).bastionHp - next.bastionHp;
-    expect(regenOne).toBeGreaterThan(regenZero);
-  });
-
-  it('UP_WALL is a no-op when gold is insufficient', () => {
-    const base = startingRun(81);
-    const poor: GameState = { ...base, gold: 0, bastionMaxHp: 130, bastionHp: 50 };
-    expect(purchaseUpgrade(poor, 'UP_WALL')).toBe(poor);
+    const activeBefore = state.team.find((s) => s.isActive)!.pokemon!;
+    const activeAfter = next.team.find((s) => s.isActive)!.pokemon!;
+    expect(activeAfter.hp).toBeLessThan(activeBefore.hp); // took boss anchor strike damage
   });
 
   it('at UP_SPD = 0, central Pokémon fires autonomous projectiles at base cadence, and increasing UP_SPD increases firing rate', () => {
@@ -419,19 +398,31 @@ describe('tickGame', () => {
   it('ends the run when an enemy reaches the bastion and HP is depleted', () => {
     const base = startingRun(41);
     const atCenter = { ...base.enemies[0], x: ARENA.CENTER, y: ARENA.CENTER };
-    const doomed: GameState = { ...base, bastionHp: 1, enemies: [atCenter], waveEnemiesRemaining: 1 };
+    const doomed: GameState = {
+      ...base,
+      team: base.team.map((s) => s.isActive && s.pokemon ? { ...s, pokemon: { ...s.pokemon, hp: 1 } } : s) as Team6,
+      enemies: [atCenter],
+      waveEnemiesRemaining: 1,
+    };
     const next = tickGame(doomed, {}, config, 16.7, mulberry32(42));
     expect(next.phase).toBe('GAME_OVER');
-    expect(next.bastionHp).toBe(0);
-    expect(next.runStats.defeatCause).toBe('bastionDestroyed');
+    const active = next.team.find((s) => s.index === 0)!.pokemon!;
+    expect(active.hp).toBe(0);
+    expect(active.alive).toBe(false);
+    expect(next.runStats.defeatCause).toBe('teamWiped');
     expect(next.runStats.defeatEnemyType).toBeDefined();
   });
 
-  it('regenerates bastion HP passively each step', () => {
+  it('does not regenerate HP passively during combat or breather (Rule D10)', () => {
     const base = startingRun(51);
-    const hurt: GameState = { ...base, bastionHp: 50 };
+    const activeSlot = base.team.findIndex((s) => s.isActive);
+    const woundedTeam = base.team.map((s, idx) =>
+      idx === activeSlot && s.pokemon ? { ...s, pokemon: { ...s.pokemon, hp: 50, maxHp: 100 } } : s,
+    ) as Team6;
+    const hurt: GameState = { ...base, team: woundedTeam };
     const next = tickGame(hurt, {}, config, 16.7, mulberry32(52));
-    expect(next.bastionHp).toBeGreaterThan(50);
+    const activeNext = next.team[activeSlot].pokemon!;
+    expect(activeNext.hp).toBe(50);
   });
 
   it('hits nearby enemies with a switch-in burst and credits the incoming slot', () => {
@@ -457,7 +448,7 @@ describe('tickGame', () => {
     const atCenter = { ...base.enemies[0], x: ARENA.CENTER, y: ARENA.CENTER };
     const doomed: GameState = {
       ...base,
-      bastionHp: 1,
+      team: base.team.map((s) => s.isActive && s.pokemon ? { ...s, pokemon: { ...s.pokemon, hp: 1 } } : s) as Team6,
       enemies: [atCenter],
       waveEnemiesRemaining: 1,
       runStats: { ...base.runStats, damagePerSlot: [0, 10, 0, 0, 0, 0] },
@@ -474,3 +465,230 @@ describe('tickGame', () => {
     expect(next.floatingTexts.some((t) => t.id === 999)).toBe(false);
   });
 });
+
+describe('Block 3A.2-V — Individual Vitality & Route Stop Config', () => {
+  describe('Rule D9 — Fainted Pokémon cannot be swapped in via hotSwap', () => {
+    it('does not change the active Pokémon if target slot has alive === false', () => {
+      const base = startingRun(1);
+      const pkm1 = { ...base.team[0].pokemon!, id: 2, alive: false, hp: 0 };
+      const withFainted: GameState = {
+        ...base,
+        team: base.team.map((s, idx) => (idx === 1 ? { ...s, pokemon: pkm1 } : s)) as Team6,
+      };
+      const after = tickGame(withFainted, { hotSwapIndex: 1 }, config, 0, mulberry32(1));
+      expect(after.team[0].isActive).toBe(true);
+      expect(after.team[1].isActive).toBe(false);
+    });
+  });
+
+  describe('Rules D7 & D8 — Active damage with type effectiveness', () => {
+    it('leak reduces hp of active only, applying type effectiveness, and does not damage bench', () => {
+      // Starter 0001 (Bulbasaur, Grass/Poison)
+      const base = tickGame(emptyState(), { startRun: [{ definitionId: '0001', stars: 1 }, { definitionId: '0007', stars: 1 }, null, null, null, null] }, config, 0, mulberry32(1));
+      const active0 = base.team[0].pokemon!;
+      const bench0 = base.team[1].pokemon!;
+      expect(active0.hp).toBe(active0.maxHp);
+      expect(bench0.hp).toBe(bench0.maxHp);
+
+      // Fire enemy at center: Fire vs Grass/Poison => 1.5 * 1.0 = 1.5 effectiveness
+      const fireEnemy = {
+        ...base.enemies[0],
+        x: ARENA.CENTER,
+        y: ARENA.CENTER,
+        types: [PokemonType.Fire] as [PokemonType],
+      };
+      const state: GameState = {
+        ...base,
+        floor: 1,
+        enemies: [fireEnemy],
+        waveEnemiesRemaining: 1,
+        interWaveTimerSec: 1.5,
+      };
+
+      const next = tickGame(state, {}, config, 16.7, mulberry32(2));
+      const active1 = next.team[0].pokemon!;
+      const bench1 = next.team[1].pokemon!;
+
+      const expectedDmg = Math.round(leakDamageForFloor(1) * 1.5);
+      expect(active0.hp - active1.hp).toBe(expectedDmg);
+      expect(bench1.hp).toBe(bench0.hp); // bench completely unharmed
+    });
+
+    it('active takes no damage when bastionShieldSec > 0 and displays BLOQUEO', () => {
+      const base = startingRun(1);
+      const active0 = base.team[0].pokemon!;
+      const atCenter = { ...base.enemies[0], x: ARENA.CENTER, y: ARENA.CENTER };
+      const shielded: GameState = {
+        ...base,
+        enemies: [atCenter],
+        waveEnemiesRemaining: 1,
+        bastionShieldSec: 2.0,
+      };
+      const next = tickGame(shielded, {}, config, 16.7, mulberry32(1));
+      const active1 = next.team[0].pokemon!;
+      expect(active1.hp).toBe(active0.hp);
+      expect(next.floatingTexts.some((t) => t.text === 'BLOQUEO')).toBe(true);
+    });
+
+    it('boss anchor strike damages only the active Pokémon according to its maxHp fraction', () => {
+      const base = tickGame(emptyState(), { startRun: [{ definitionId: '0004', stars: 1 }, { definitionId: '0007', stars: 1 }, null, null, null, null] }, config, 0, mulberry32(1));
+      const active0 = base.team[0].pokemon!;
+      const bench0 = base.team[1].pokemon!;
+      const bossEnemy = {
+        ...base.enemies[0],
+        id: 99,
+        x: ARENA.CENTER,
+        y: ARENA.CENTER + 10,
+        hp: 1000,
+        maxHp: 1000,
+        alive: true,
+        isBoss: true,
+        definitionId: '0127',
+        types: [PokemonType.Normal] as [PokemonType],
+      };
+      const state: GameState = {
+        ...base,
+        enemies: [bossEnemy],
+        waveEnemiesRemaining: 1,
+        interWaveTimerSec: 1.5,
+      };
+      const next = tickGame(state, {}, config, 16.7, mulberry32(1));
+      const active1 = next.team[0].pokemon!;
+      const bench1 = next.team[1].pokemon!;
+      expect(active1.hp).toBeLessThan(active0.hp);
+      expect(bench1.hp).toBe(bench0.hp);
+    });
+  });
+
+  describe('Rules D16 & D17 — Lethal damage, Overkill discard, Forced Switch-In, and teamWiped', () => {
+    it('discards overkill, logs faint in faintLog, forces switch-in without adding cooldown, and triggers switch-in burst', () => {
+      // Active has 5 HP, bench has 100 HP
+      const base = tickGame(emptyState(), { startRun: [{ definitionId: '0004', stars: 1 }, { definitionId: '0007', stars: 1 }, null, null, null, null] }, config, 0, mulberry32(1));
+      const slot0 = base.team[0];
+      const slot1 = base.team[1];
+      const withLowHp: GameState = {
+        ...base,
+        floor: 3,
+        team: [
+          { ...slot0, pokemon: { ...slot0.pokemon!, hp: 5 } },
+          { ...slot1, pokemon: { ...slot1.pokemon! } },
+          base.team[2],
+          base.team[3],
+          base.team[4],
+          base.team[5],
+        ] as Team6,
+        enemies: [{
+          ...base.enemies[0],
+          x: ARENA.CENTER,
+          y: ARENA.CENTER,
+          types: [PokemonType.Water] as [PokemonType],
+        }],
+        waveEnemiesRemaining: 1,
+      };
+
+      // Leak deals leakDamageForFloor(3) * eff (Water vs Fire = 1.5) > 20 damage (far exceeding 5 HP)
+      const next = tickGame(withLowHp, {}, config, 16.7, mulberry32(1));
+
+      // Slot 0 fainted
+      const prevActive = next.team[0].pokemon!;
+      expect(prevActive.hp).toBe(0);
+      expect(prevActive.alive).toBe(false);
+      expect(next.team[0].isActive).toBe(false);
+
+      // faintLog entry recorded
+      expect(next.runStats.faintLog).toBeDefined();
+      expect(next.runStats.faintLog?.length).toBe(1);
+      expect(next.runStats.faintLog?.[0]).toEqual({
+        slot: 0,
+        definitionId: '0004',
+        floor: 3,
+        cause: 'leak',
+        killerType: PokemonType.Water,
+      });
+
+      // Forced switch-in to living candidate (slot 1)
+      expect(next.team[1].isActive).toBe(true);
+      const newActive = next.team[1].pokemon!;
+      expect(newActive.alive).toBe(true);
+
+      // Overkill discarded: new active retains full maxHp intact!
+      expect(newActive.hp).toBe(newActive.maxHp);
+      expect(newActive.hp).toBe(slot1.pokemon!.maxHp);
+
+      // NO cooldown added to hotSwapCooldowns for forced switch-in
+      expect(next.hotSwapCooldowns[1]).toBe(0);
+    });
+
+    it('when the last living Pokémon falls, triggers immediate GAME_OVER with defeatCause teamWiped', () => {
+      const base = startingRun(1);
+      const slot0 = base.team[0];
+      const doomed: GameState = {
+        ...base,
+        floor: 5,
+        team: [
+          { ...slot0, pokemon: { ...slot0.pokemon!, hp: 2 } },
+          base.team[1],
+          base.team[2],
+          base.team[3],
+          base.team[4],
+          base.team[5],
+        ] as Team6,
+        enemies: [{
+          ...base.enemies[0],
+          x: ARENA.CENTER,
+          y: ARENA.CENTER,
+          types: [PokemonType.Rock] as [PokemonType],
+        }],
+        waveEnemiesRemaining: 1,
+      };
+      const next = tickGame(doomed, {}, config, 16.7, mulberry32(1));
+      expect(next.phase).toBe('GAME_OVER');
+      expect(next.runStats.defeatCause).toBe('teamWiped');
+      expect(next.runStats.defeatEnemyType).toBe(PokemonType.Rock);
+    });
+  });
+
+  describe('Rule D10 — Zero healing outside Route Stops', () => {
+    it('advancing multiple ticks in combat and breather with wounded Pokémon never increases sum of team HP', () => {
+      const base = startingRun(1);
+      const activeSlot = base.team.findIndex((s) => s.isActive);
+      const woundedTeam = base.team.map((s, idx) =>
+        idx === activeSlot && s.pokemon ? { ...s, pokemon: { ...s.pokemon, hp: 40, maxHp: 100 } } : s,
+      ) as Team6;
+
+      // In combat (no enemies at center, just moving)
+      let s: GameState = {
+        ...base,
+        team: woundedTeam,
+        enemies: [{
+          ...base.enemies[0],
+          x: 10,
+          y: 10,
+          hp: 1e6,
+          maxHp: 1e6,
+        }],
+      };
+      const initialHpSum = s.team.reduce((sum, sl) => sum + (sl.pokemon?.hp ?? 0), 0);
+
+      for (let i = 0; i < 60; i++) {
+        s = tickGame(s, {}, config, 16.7, mulberry32(i));
+      }
+      const combatHpSum = s.team.reduce((sum, sl) => sum + (sl.pokemon?.hp ?? 0), 0);
+      expect(combatHpSum).toBeLessThanOrEqual(initialHpSum);
+
+      // In breather between waves
+      s = {
+        ...s,
+        enemies: [],
+        waveEnemiesRemaining: 0,
+        interWaveTimerSec: 2.0,
+      };
+      for (let i = 0; i < 60; i++) {
+        s = tickGame(s, {}, config, 16.7, mulberry32(i + 100));
+      }
+      const breatherHpSum = s.team.reduce((sum, sl) => sum + (sl.pokemon?.hp ?? 0), 0);
+      expect(breatherHpSum).toBeLessThanOrEqual(initialHpSum);
+    });
+  });
+});
+

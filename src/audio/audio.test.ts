@@ -3,8 +3,13 @@ import { detectAudioEvents, sceneFor } from './events';
 import { THEMES, noteToMidi, parseMelody } from './themes';
 import type { GameState } from '../core/types';
 
-function slot(i: number, active = false) {
-  return { index: i, pokemon: null, isActive: active, hotSwapCooldownSec: 0 };
+function slot(i: number, active = false, hp = 100, maxHp = 100) {
+  return {
+    index: i,
+    pokemon: { definitionId: '0004', hp, maxHp, alive: hp > 0 },
+    isActive: active,
+    hotSwapCooldownSec: 0,
+  };
 }
 
 function state(over: Partial<GameState> = {}): GameState {
@@ -14,9 +19,15 @@ function state(over: Partial<GameState> = {}): GameState {
     team: [slot(0, true), slot(1), slot(2), slot(3), slot(4), slot(5)],
     teamLevel: 1,
     gold: 0,
-    bastionHp: 100,
-    bastionMaxHp: 100,
-    bastionUpgrades: { UP_HP: 0 },
+    bastionUpgrades: {
+      UP_ARROW: 0,
+      UP_SPD: 0,
+      UP_MULTI: 0,
+      UP_AUTOCLICK: 0,
+      UP_CRIT: 0,
+      UP_CDMG: 0,
+      UP_GOLD: 0,
+    },
     enemies: [],
     projectiles: [],
     floatingTexts: [],
@@ -33,7 +44,11 @@ describe('detectAudioEvents', () => {
 
   it('detecta bajas, daño al bastión y subida de piso', () => {
     const prev = state();
-    const next = state({ floor: 2, bastionHp: 80, runStats: { totalKills: 3 } as never });
+    const next = state({
+      floor: 2,
+      team: [slot(0, true, 80), slot(1), slot(2), slot(3), slot(4), slot(5)],
+      runStats: { totalKills: 3 } as never,
+    });
     const types = detectAudioEvents(prev, next).map((e) => e.type);
     expect(types).toEqual(expect.arrayContaining(['kill', 'hurt', 'floor']));
   });
@@ -56,7 +71,7 @@ describe('detectAudioEvents', () => {
   });
 
   it('compra de mejora vs. nivel de equipo', () => {
-    expect(detectAudioEvents(state(), state({ bastionUpgrades: { UP_HP: 1 } as never })).map((e) => e.type)).toEqual(['buy']);
+    expect(detectAudioEvents(state(), state({ bastionUpgrades: { UP_ARROW: 1 } as never })).map((e) => e.type)).toEqual(['buy']);
     expect(detectAudioEvents(state(), state({ teamLevel: 2 })).map((e) => e.type)).toEqual(['levelUp']);
   });
 });

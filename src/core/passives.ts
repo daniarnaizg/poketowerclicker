@@ -13,12 +13,12 @@
  *   GOLD            extra gold per kill (additive with UP_GOLD)
  *   CLICK_DAMAGE    extra click damage
  *   ULT_CHARGE      extra ultimate charge rate (fraction)
- *   BASTION_REGEN   extra passive regen, as a fraction of max HP per second
+ *   MAX_HP          extra max HP for all team members (fraction)
  *
  * Unknown stat keys are ignored (forward-compatible with future species data).
  */
 
-import type { GameState, PokemonDefinition, PokemonType, Team6 } from './types';
+import type { GameState, PokemonDefinition, PokemonType, Team6, TeamSlot } from './types';
 import {
   BENCH_BONUS_CAP,
   BENCH_PASSIVE_ACTIVE_COUNTS,
@@ -26,6 +26,7 @@ import {
   MAX_STARS,
   STAR_BENCH_PASSIVE,
 } from '../config/balance.config';
+import { POKEDEX } from '../data/pokemon';
 
 export interface TeamBonuses {
   /** Per attacker type, keyed by the PokemonType enum string (e.g. 'FIRE'). */
@@ -36,7 +37,8 @@ export interface TeamBonuses {
   gold: number;
   clickDamage: number;
   ultCharge: number;
-  bastionRegen: number;
+  /** Additive max HP bonus fraction for all team members (e.g. 0.12 = +12% maxHp) */
+  maxHp: number;
 }
 
 export const NO_BONUSES: Readonly<TeamBonuses> = Object.freeze({
@@ -47,7 +49,7 @@ export const NO_BONUSES: Readonly<TeamBonuses> = Object.freeze({
   gold: 0,
   clickDamage: 0,
   ultCharge: 0,
-  bastionRegen: 0,
+  maxHp: 0,
 });
 
 /** Clamp an awakening rank into 1..MAX_STARS; undefined counts as 1★. */
@@ -65,8 +67,8 @@ export function benchPassiveValue(def: PokemonDefinition, stars: number): number
 
 /** Sum every team member's passive into one TeamBonuses (each stat capped). */
 export function computeTeamBonuses(
-  team: Team6 | GameState['team'],
-  pokedex: Readonly<Record<string, PokemonDefinition>>,
+  team: readonly TeamSlot[] | Team6 | GameState['team'],
+  pokedex: Readonly<Record<string, PokemonDefinition>> = POKEDEX,
 ): TeamBonuses {
   const out: TeamBonuses = {
     typeDamage: {},
@@ -76,12 +78,12 @@ export function computeTeamBonuses(
     gold: 0,
     clickDamage: 0,
     ultCharge: 0,
-    bastionRegen: 0,
+    maxHp: 0,
   };
 
   for (const slot of team) {
     const pkm = slot.pokemon;
-    if (!pkm) continue;
+    if (!pkm || !pkm.alive || (pkm.stars ?? 1) < 2) continue;
     if (!BENCH_PASSIVE_ACTIVE_COUNTS && slot.isActive) continue;
     const def = pokedex[pkm.definitionId];
     if (!def) continue;
@@ -101,7 +103,7 @@ export function computeTeamBonuses(
       case 'GOLD': out.gold += value; break;
       case 'CLICK_DAMAGE': out.clickDamage += value; break;
       case 'ULT_CHARGE': out.ultCharge += value; break;
-      case 'BASTION_REGEN': out.bastionRegen += value; break;
+      case 'MAX_HP': out.maxHp += value; break;
       default: break;
     }
   }
@@ -115,6 +117,7 @@ export function computeTeamBonuses(
   out.gold = cap(out.gold);
   out.clickDamage = cap(out.clickDamage);
   out.ultCharge = cap(out.ultCharge);
+  out.maxHp = cap(out.maxHp);
   return out;
 }
 

@@ -17,11 +17,16 @@ interface Props {
   /** Unified Team Level, shared by all six slots (PRD §4.1). */
   teamLevel: number;
   onHotSwap: (index: number) => void;
+  gameState?: { phase?: string };
 }
 
 const hpColor = (r: number) => (r > 0.5 ? '#48c048' : r >= 0.25 ? '#f8d030' : '#f04040');
 
-export function TeamBar({ team, hotSwapCooldowns, teamLevel, onHotSwap }: Props) {
+export function TeamBar({ team, hotSwapCooldowns, teamLevel, onHotSwap, gameState }: Props) {
+  const notInCombat = gameState
+    ? gameState.phase !== 'COMBAT' && gameState.phase !== 'PLAYING'
+    : false;
+
   return (
     <div class="team-bar pk-window shrink-0 p-3">
       <div class="team-bar-header mb-3 flex items-center gap-2 text-[11px]">
@@ -30,9 +35,10 @@ export function TeamBar({ team, hotSwapCooldowns, teamLevel, onHotSwap }: Props)
       <div class="team-bar-grid grid grid-cols-3 gap-2.5">
         {team.map((slot, i) => {
           const pkm = slot.pokemon;
+          const isFainted = !pkm ? false : (!pkm.alive || pkm.hp <= 0);
           const cooldown = hotSwapCooldowns[i];
           const onCooldown = cooldown > 0;
-          const disabled = !pkm || onCooldown;
+          const disabled = !pkm || isFainted || onCooldown || notInCombat;
           const hpRatio = pkm && pkm.maxHp > 0 ? Math.max(0, Math.min(1, pkm.hp / pkm.maxHp)) : 0;
           const stars = starsOf(pkm);
           const apex = !!pkm && stars >= MAX_STARS;
@@ -43,17 +49,26 @@ export function TeamBar({ team, hotSwapCooldowns, teamLevel, onHotSwap }: Props)
               type="button"
               disabled={disabled}
               onClick={() => onHotSwap(i)}
-              title={pkm && passive && stars >= 2 ? `Pasiva: ${describePassive(passive.stat, passive.value * (apex ? 2 : 1))}` : undefined}
+              title={
+                pkm && passive && stars >= 2
+                  ? `Pasiva: ${describePassive(passive.stat, passive.value * (apex ? 2 : 1))}${isFainted ? ' (OFF)' : ''}`
+                  : undefined
+              }
               data-testid={`team-slot-${i}`}
               class={`pk-btn team-slot-btn relative flex flex-col items-center gap-1 px-1 py-2 text-[9px] ${
                 slot.isActive ? 'pk-btn-active' : ''
-              }`}
+              } ${isFainted ? 'opacity-65' : ''}`}
               style={apex ? { borderColor: '#e0a000', boxShadow: '0 4px 0 #e0a000, 0 0 8px #ffd860' } : undefined}
             >
               <span class="absolute left-1 top-1 text-[9px]">{i + 1}</span>
+              {isFainted && (
+                <span className="pk-chip absolute right-1 top-1 bg-[#c03028] text-white text-[8px] px-1 py-0">
+                  DEBILITADO
+                </span>
+              )}
               {pkm ? (
                 <img
-                  class="pk-sprite h-10 w-10"
+                  class={`pk-sprite h-10 w-10 ${isFainted ? 'grayscale opacity-50' : ''}`}
                   src={portraitUrl(pkm.definitionId)}
                   alt=""
                   width={40}
@@ -71,6 +86,16 @@ export function TeamBar({ team, hotSwapCooldowns, teamLevel, onHotSwap }: Props)
               <span class="pk-bar w-full">
                 <span style={{ width: `${hpRatio * 100}%`, background: hpColor(hpRatio) }} />
               </span>
+              {pkm && passive && stars >= 2 && (
+                <span
+                  class={`w-full truncate text-center text-[7px] ${
+                    isFainted ? 'line-through opacity-60' : 'text-[#a8c0e0]'
+                  }`}
+                >
+                  {describePassive(passive.stat, passive.value * (apex ? 2 : 1))}
+                  {isFainted ? ' (OFF)' : ''}
+                </span>
+              )}
               {onCooldown && (
                 <span class="pk-num absolute inset-0 flex items-center justify-center bg-black/65 text-2xl text-white">
                   {cooldown.toFixed(1)}s
