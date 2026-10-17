@@ -5,16 +5,17 @@
 import {
   ARROW_DAMAGE_PER_LEVEL,
   AUTOCLICK_CPS_BY_LEVEL,
-  AUTOCLICK_MAX_LEVEL,
+  AUTO_SPD_BASE_MULT,
   BASTION_REGEN_FRACTION_PER_SEC,
   CRIT_CHANCE_PER_UP_CRIT,
   GOLD_PER_LEVEL,
   HP_PER_LEVEL,
-  MULTI_MAX,
+  MULTI_MAX_LEVEL,
+  REGEN_PER_LEVEL,
   SPD_PER_LEVEL,
   teamLevelCost,
   upgradeCost,
-  WALL_HP_PER_LEVEL,
+  upgradeMaxLevel,
 } from '../../config/balance.config';
 import { BASTION_UPGRADE_IDS } from '../../core/types';
 import type { BastionUpgradeId, BastionUpgrades as BastionUpgradeLevels } from '../../core/types';
@@ -32,16 +33,15 @@ const pct = (v: number) => `${Math.round(v * 100)}%`;
 const LEVEL_BAR_MAX = 10;
 
 const UPGRADE_INFO: Record<BastionUpgradeId, { name: string; effect: string }> = {
-  UP_CLICK: { name: 'Daño de clic', effect: 'Aumenta el daño de tus clics' },
-  UP_HP: { name: 'Muralla', effect: `+${HP_PER_LEVEL} HP · regen ${pct(BASTION_REGEN_FRACTION_PER_SEC)}/s` },
-  UP_MULTI: { name: 'Multidisparo', effect: `+1 disparo/rebote (máx ${MULTI_MAX})` },
-  UP_ARROW: { name: 'Flechas', effect: `+${pct(ARROW_DAMAGE_PER_LEVEL)} daño de proyectil` },
-  UP_SPD: { name: 'Cadencia', effect: `+${pct(SPD_PER_LEVEL)} velocidad de ataque` },
+  UP_HP: { name: 'Vida Máxima', effect: `+${HP_PER_LEVEL} HP máximo (y cura al comprar)` },
+  UP_MULTI: { name: 'Multidisparo', effect: `+1 disparo autónomo del Pokémon (máx ${MULTI_MAX_LEVEL} mejoras)` },
+  UP_ARROW: { name: 'Proyectiles', effect: `+${pct(ARROW_DAMAGE_PER_LEVEL)} daño de proyectil (manual y auto)` },
+  UP_SPD: { name: 'Cadencia Auto', effect: `+${pct(SPD_PER_LEVEL)} velocidad de disparo autónomo (base ${pct(AUTO_SPD_BASE_MULT)})` },
   UP_CRIT: { name: 'Precisión', effect: `+${pct(CRIT_CHANCE_PER_UP_CRIT)} prob. de crítico` },
   UP_CDMG: { name: 'Furia', effect: '+10% daño crítico' },
   UP_GOLD: { name: 'Codicia', effect: `+${pct(GOLD_PER_LEVEL)} oro` },
-  UP_WALL: { name: 'Fortaleza', effect: `+${pct(WALL_HP_PER_LEVEL)} HP máximo` },
-  UP_AUTOCLICK: { name: 'Autoclick', effect: 'Disparo automático hacia el cursor' },
+  UP_WALL: { name: 'Regeneración', effect: `+0.5% regeneración de HP/s (base ${pct(BASTION_REGEN_FRACTION_PER_SEC)}/s)` },
+  UP_AUTOCLICK: { name: 'Autoclick', effect: 'Dispara proyectiles hacia donde esté tu cursor' },
 };
 
 export function BastionUpgrades({ upgrades, gold, teamLevel, onPurchase, onBuyTeamLevel }: Props) {
@@ -74,7 +74,9 @@ export function BastionUpgrades({ upgrades, gold, teamLevel, onPurchase, onBuyTe
       >
         {BASTION_UPGRADE_IDS.map((id) => {
           const level = upgrades[id] ?? 0;
-          const isMax = id === 'UP_AUTOCLICK' && level >= AUTOCLICK_MAX_LEVEL;
+          const maxLevel = upgradeMaxLevel(id);
+          const isMax = maxLevel !== undefined && level >= maxLevel;
+          const barCap = maxLevel ?? LEVEL_BAR_MAX;
           const cost = upgradeCost(id, level);
           const info = UPGRADE_INFO[id];
           const cps = AUTOCLICK_CPS_BY_LEVEL[level] ?? 0;
@@ -108,16 +110,33 @@ export function BastionUpgrades({ upgrades, gold, teamLevel, onPurchase, onBuyTe
                   {cps} clics/s
                 </span>
               )}
+              {id === 'UP_MULTI' && (
+                <span class="text-[9px] text-[#555]">
+                  {1 + level} disp. auto
+                </span>
+              )}
+              {id === 'UP_SPD' && (
+                <span class="text-[9px] text-[#555]">
+                  {pct(AUTO_SPD_BASE_MULT + level * SPD_PER_LEVEL)} cadencia
+                </span>
+              )}
+              {id === 'UP_WALL' && (
+                <span class="text-[9px] text-[#555]">
+                  {((BASTION_REGEN_FRACTION_PER_SEC + level * REGEN_PER_LEVEL) * 100).toFixed(1)}% HP/s
+                </span>
+              )}
               <span class="flex w-full items-center gap-1.5">
                 <span class="pk-bar flex-1" style={{ height: '8px' }}>
                   <span
                     style={{
-                      width: `${(Math.min(level, LEVEL_BAR_MAX) / LEVEL_BAR_MAX) * 100}%`,
+                      width: `${(Math.min(level, barCap) / barCap) * 100}%`,
                       background: '#58b0f8',
                     }}
                   />
                 </span>
-                <span class="shrink-0 text-[9px] font-bold text-[#303030]">Nv {level}</span>
+                <span class="shrink-0 text-[9px] font-bold text-[#303030]">
+                  Nv {level}{maxLevel ? `/${maxLevel}` : ''}
+                </span>
               </span>
             </button>
           );

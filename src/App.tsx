@@ -57,7 +57,6 @@ function mulberry32(seed: number): () => number {
 }
 
 const ZERO_UPGRADES: BastionUpgradeLevels = {
-  UP_CLICK: 0,
   UP_HP: 0,
   UP_MULTI: 0,
   UP_ARROW: 0,
@@ -175,6 +174,7 @@ export default function App() {
       if (e.button !== 0) return;
       const point = toArena(e);
       if (!point) return;
+      canvas.classList.add('is-clicking');
       hold.active = true;
       hold.x = point.x;
       hold.y = point.y;
@@ -220,9 +220,11 @@ export default function App() {
       if (e.pointerType === 'mouse') {
         mouse.inside = false;
       }
+      canvas.classList.remove('is-clicking');
     };
 
     const onPointerEnd = (e: PointerEvent): void => {
+      canvas.classList.remove('is-clicking');
       hold.active = false;
       try {
         if (canvas.hasPointerCapture(e.pointerId)) {

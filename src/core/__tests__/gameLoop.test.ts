@@ -23,7 +23,6 @@ import type { BastionUpgrades, Cooldowns6, GameConfig, GameState, Team6 } from '
 const config: GameConfig = { pokedex: POKEDEX, typeChart: TYPE_CHART, seed: 42 };
 
 const ZERO_UPGRADES: BastionUpgrades = {
-  UP_CLICK: 0,
   UP_HP: 0,
   UP_MULTI: 0,
   UP_ARROW: 0,
@@ -283,15 +282,19 @@ describe('tickGame', () => {
     expect(next.bastionHp).toBeLessThan(500); // took boss anchor strike damage
   });
 
-  it('UP_WALL raises max HP by 10% (rounded) and heals by the same amount', () => {
+  it('UP_WALL increments level, deducts gold, does not modify maxHp, and boosts passive regen', () => {
     const base = startingRun(81);
     const wallState: GameState = { ...base, gold: 1000, bastionMaxHp: 130, bastionHp: 50 };
     const next = purchaseUpgrade(wallState, 'UP_WALL');
-    const gain = Math.round(130 * WALL_HP_PER_LEVEL);
     expect(next.bastionUpgrades.UP_WALL).toBe(1);
-    expect(next.bastionMaxHp).toBe(130 + gain);
-    expect(next.bastionHp).toBe(50 + gain);
+    expect(next.bastionMaxHp).toBe(130);
+    expect(next.bastionHp).toBe(50);
     expect(next.gold).toBe(1000 - calculateUpgradeCost('UP_WALL', 0));
+
+    // Passive regen per tick is higher with UP_WALL = 1 than UP_WALL = 0
+    const regenZero = tickGame(wallState, {}, config, 16.7, mulberry32(1)).bastionHp - wallState.bastionHp;
+    const regenOne = tickGame(next, {}, config, 16.7, mulberry32(1)).bastionHp - next.bastionHp;
+    expect(regenOne).toBeGreaterThan(regenZero);
   });
 
   it('UP_WALL is a no-op when gold is insufficient', () => {
@@ -300,10 +303,81 @@ describe('tickGame', () => {
     expect(purchaseUpgrade(poor, 'UP_WALL')).toBe(poor);
   });
 
-  it('UP_AUTOCLICK increments level and deducts gold up to max level', () => {
+  it('at UP_SPD = 0, central Pokémon fires autonomous projectiles at base cadence, and increasing UP_SPD increases firing rate', () => {
+    const base = startingRun(1);
+    expect(base.bastionUpgrades.UP_SPD).toBe(0);
+    const tickedZero = tickGame(base, {}, config, 1000, () => 0);
+    expect(tickedZero.projectiles.length).toBeGreaterThan(0);
+
+    const withSpd: GameState = {
+      ...base,
+      bastionUpgrades: { ...base.bastionUpgrades, UP_SPD: 5 },
+    };
+    let shotsZero = 0;
+    let s0 = base;
+    let shotsSpd = 0;
+    let sSpd = withSpd;
+    for (let i = 0; i < 60; i++) {
+      s0 = tickGame(s0, {}, config, 16.7, mulberry32(200 + i));
+      shotsZero += s0.projectiles.length;
+      s0 = { ...s0, projectiles: [] };
+
+      sSpd = tickGame(sSpd, {}, config, 16.7, mulberry32(200 + i));
+      shotsSpd += sSpd.projectiles.length;
+      sSpd = { ...sSpd, projectiles: [] };
+    }
+    expect(shotsZero).toBeGreaterThan(0);
+    expect(shotsSpd).toBeGreaterThan(shotsZero);
+  });
+
+  it('input.click spawns 1 projectile toward target and adds a RING visual effect, and UP_MULTI does not increase click projectile count', () => {
+    const base = startingRun(1);
+    const target = { x: 50, y: 80 };
+    const clicked = tickGame(base, { click: target }, config, 0, mulberry32(1));
+    expect(clicked.projectiles).toHaveLength(1);
+    const p = clicked.projectiles[0];
+    expect(p.x).toBe(ARENA.CENTER);
+    expect(p.y).toBe(ARENA.CENTER);
+    expect(p.vx).toBeLessThan(0);
+    expect(p.vy).toBeLessThan(0);
+
+    // Visual effect: RING at (click.x, click.y)
+    const ring = clicked.effects?.find((fx) => fx.kind === 'RING' && fx.x === target.x && fx.y === target.y);
+    expect(ring).toBeDefined();
+    expect(ring?.radius).toBe(14);
+    expect(ring?.maxAge).toBe(0.22);
+
+    // UP_MULTI does NOT increase click projectile count
+    const withMulti: GameState = {
+      ...base,
+      bastionUpgrades: { ...base.bastionUpgrades, UP_MULTI: 3 },
+    };
+    const clickedMulti = tickGame(withMulti, { click: target }, config, 0, mulberry32(1));
+    expect(clickedMulti.projectiles).toHaveLength(1);
+  });
+
+  it('UP_MULTI caps at MULTI_MAX_LEVEL (4) with steep cost scaling (150 * 3.2^level)', () => {
+    expect(calculateUpgradeCost('UP_MULTI', 0)).toBe(150);
+    expect(calculateUpgradeCost('UP_MULTI', 1)).toBe(Math.floor(150 * 3.2));
+    expect(calculateUpgradeCost('UP_MULTI', 2)).toBe(Math.floor(150 * Math.pow(3.2, 2)));
+    expect(calculateUpgradeCost('UP_MULTI', 3)).toBe(Math.floor(150 * Math.pow(3.2, 3)));
+    expect(calculateUpgradeCost('UP_MULTI', 4)).toBe(Infinity);
+
+    const base = startingRun(81);
+    const maxed: GameState = {
+      ...base,
+      gold: 100_000,
+      bastionUpgrades: { ...base.bastionUpgrades, UP_MULTI: 4 },
+    };
+    expect(purchaseUpgrade(maxed, 'UP_MULTI')).toBe(maxed);
+  });
+
+  it('UP_AUTOCLICK base cost is 100 (100 * 2.8^level) and caps at level 5', () => {
     const base = startingRun(81);
     const cost0 = calculateUpgradeCost('UP_AUTOCLICK', 0);
-    expect(cost0).toBe(25);
+    expect(cost0).toBe(100);
+    expect(calculateUpgradeCost('UP_AUTOCLICK', 1)).toBe(Math.floor(100 * 2.8));
+    expect(calculateUpgradeCost('UP_AUTOCLICK', 2)).toBe(Math.floor(100 * Math.pow(2.8, 2)));
 
     const withGold: GameState = { ...base, gold: 1000, bastionUpgrades: { ...base.bastionUpgrades, UP_AUTOCLICK: 0 } };
     const bought = purchaseUpgrade(withGold, 'UP_AUTOCLICK');

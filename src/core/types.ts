@@ -261,7 +261,6 @@ export interface RunStats {
 }
 
 export type BastionUpgradeId =
-  | 'UP_CLICK'
   | 'UP_HP'
   | 'UP_MULTI'
   | 'UP_ARROW'
@@ -273,21 +272,21 @@ export type BastionUpgradeId =
   | 'UP_AUTOCLICK';
 
 export const BASTION_UPGRADE_IDS: readonly BastionUpgradeId[] = [
-  'UP_CLICK',
-  'UP_HP',
-  'UP_MULTI',
   'UP_ARROW',
   'UP_SPD',
+  'UP_MULTI',
+  'UP_AUTOCLICK',
   'UP_CRIT',
   'UP_CDMG',
-  'UP_GOLD',
+  'UP_HP',
   'UP_WALL',
-  'UP_AUTOCLICK',
+  'UP_GOLD',
 ] as const;
 
-/** Level of each upgrade (0 = not purchased; UP_AUTOCLICK optional for backward compat in tests). */
+/** Level of each upgrade (0 = not purchased; UP_AUTOCLICK optional for backward compat in tests; UP_CLICK legacy). */
 export type BastionUpgrades = Record<Exclude<BastionUpgradeId, 'UP_AUTOCLICK'>, number> & {
   UP_AUTOCLICK?: number;
+  UP_CLICK?: number;
 };
 
 /**

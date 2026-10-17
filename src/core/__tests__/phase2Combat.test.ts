@@ -13,7 +13,7 @@ import type {
 } from '../types';
 
 const config: GameConfig = { pokedex: POKEDEX, typeChart: TYPE_CHART, seed: 1 };
-const ZERO: BastionUpgrades = { UP_CLICK: 0, UP_HP: 0, UP_MULTI: 0, UP_ARROW: 0, UP_SPD: 0, UP_CRIT: 0, UP_CDMG: 0, UP_GOLD: 0, UP_WALL: 0 };
+const ZERO: BastionUpgrades = { UP_HP: 0, UP_MULTI: 0, UP_ARROW: 0, UP_SPD: 0, UP_CRIT: 0, UP_CDMG: 0, UP_GOLD: 0, UP_WALL: 0 };
 
 function mulberry32(seed: number): () => number {
   let a = seed;
@@ -95,8 +95,9 @@ describe('BENCH_PASSIVE (2★ / 5★)', () => {
     // Magby carries FIRE_DAMAGE as its passive.
     const fireDmg = (stars: number) => {
       const s0 = start([{ definitionId: '0004', stars: 1 }, { definitionId: '0240', stars }, null, null, null, null]);
-      const s = { ...withEnemies(s0, [{ x: 100, y: 100 }]), teamLevel: 20 };
-      return tickGame(s, { click: { x: 100, y: 100 } }, config, 0, () => 0.99).runStats.totalDamageDealt;
+      const s = { ...withEnemies(s0, [{ x: ARENA.CENTER + 30, y: ARENA.CENTER, speed: 0 }]), teamLevel: 20 };
+      const clicked = tickGame(s, { click: { x: ARENA.CENTER + 30, y: ARENA.CENTER } }, config, 100, () => 0.99);
+      return clicked.runStats.totalDamageDealt;
     };
     expect(fireDmg(1)).toBeGreaterThan(0);
     expect(fireDmg(2)).toBeGreaterThan(fireDmg(1));
@@ -184,7 +185,7 @@ describe('status ailments in the loop', () => {
 describe('4★ pattern upgrades', () => {
   const fireOnce = (id: string, stars: number) => {
     const s0 = start([{ definitionId: id, stars }]);
-    const s = withEnemies(s0, [{ x: 60, y: 192 }]);
+    const s = { ...withEnemies(s0, [{ x: 60, y: 192 }]), bastionUpgrades: { ...s0.bastionUpgrades, UP_SPD: 1 } };
     const n = tickGame(s, {}, config, 1000, () => 0); // rng 0 => always fires
     return n.projectiles[0];
   };

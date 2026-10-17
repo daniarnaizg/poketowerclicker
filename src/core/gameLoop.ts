@@ -35,7 +35,6 @@ import {
   AOE_SPLASH_RADIUS,
   AOE_SPLASH_STAR_MULTIPLIER,
   BASTION_BASE_HP,
-  BASTION_REGEN_FRACTION_PER_SEC,
   BOSS_ANCHOR_MAX_HP_FRACTION,
   BOSS_ANCHOR_TICK_SEC,
   BOSS_STATUS_DURATION_FACTOR,
@@ -43,7 +42,6 @@ import {
   bossTimerForFloor,
   BURN_DPS_FACTOR,
   CHAIN_EXTRA_BOUNCES_AT_MAX_PATTERN,
-  CLICK_BASE_DAMAGE,
   ENEMY_CONTACT_DAMAGE,
   ENEMY_CONTACT_DAMAGE_FLOOR_SCALE,
   ENEMY_CONTACT_MAX_HP_FRACTION,
@@ -69,8 +67,7 @@ import { generateWave } from './waveGenerator';
 import { rngFor } from './rng';
 import {
   attackSpeedMultiplier,
-  clickDamageMultiplier,
-  clickRadius,
+  bastionRegenRate,
   goldMultiplier,
   projectileCount,
   purchaseUpgrade,
@@ -261,18 +258,28 @@ function hitEnemy(
   return { amount: event.amount, killed, goldGained };
 }
 
-function aimProjectile(p: Projectile, target: Enemy, speed: number): void {
-  const dx = target.x - p.x;
-  const dy = target.y - p.y;
-  const len = Math.hypot(dx, dy) || 1;
-  p.vx = (dx / len) * speed;
-  p.vy = (dy / len) * speed;
+function aimProjectileAtPoint(p: Projectile, tx: number, ty: number, speed: number): void {
+  const dx = tx - p.x;
+  const dy = ty - p.y;
+  const len = Math.hypot(dx, dy);
+  if (len === 0) {
+    p.vx = 0;
+    p.vy = speed;
+  } else {
+    p.vx = (dx / len) * speed;
+    p.vy = (dy / len) * speed;
+  }
 }
 
-function createProjectile(
+function aimProjectile(p: Projectile, target: Enemy, speed: number): void {
+  aimProjectileAtPoint(p, target.x, target.y, speed);
+}
+
+function createProjectileAtPoint(
   id: number,
   active: PlayerPokemon,
-  target: Enemy,
+  tx: number,
+  ty: number,
   speed: number,
   bounce: number,
 ): Projectile {
@@ -287,7 +294,7 @@ function createProjectile(
     fromPlayer: true,
     hitIds: [],
   };
-  aimProjectile(p, target, speed);
+  aimProjectileAtPoint(p, tx, ty, speed);
 
   // 4★ "Evolución del Patrón de Disparo" (PRD §3.1).
   const evolved = starsOf(active) >= STAR_PATTERN;
@@ -302,6 +309,16 @@ function createProjectile(
   return p;
 }
 
+function createProjectile(
+  id: number,
+  active: PlayerPokemon,
+  target: Enemy,
+  speed: number,
+  bounce: number,
+): Projectile {
+  return createProjectileAtPoint(id, active, target.x, target.y, speed, bounce);
+}
+
 /** Active Pokémon fires at the nearest enemies according to its SPD + pattern. */
 function fireProjectiles(
   state: GameState,
@@ -313,8 +330,11 @@ function fireProjectiles(
   const living = enemies.filter((e) => e.alive);
   if (living.length === 0) return [];
 
+  const spdMult = attackSpeedMultiplier(state.bastionUpgrades);
+  if (spdMult <= 0) return [];
+
   const expectedShots =
-    active.spd * attackSpeedMultiplier(state.bastionUpgrades) * (1 + bonuses.attackSpeed) * FIXED_TIMESTEP;
+    active.spd * spdMult * (1 + bonuses.attackSpeed) * FIXED_TIMESTEP;
   const whole = Math.floor(expectedShots);
   const shots = whole + (rng() < expectedShots - whole ? 1 : 0);
   if (shots <= 0) return [];
@@ -550,73 +570,35 @@ function applyHotSwap(
 function applyClick(
   state: GameState,
   click: { x: number; y: number; isAuto?: boolean },
-  config: GameConfig,
-  rng: () => number,
+  _config: GameConfig,
+  _rng: () => number,
 ): GameState {
   const active = getActive(state);
   if (!active) return state;
 
-  const bonuses = computeTeamBonuses(state.team, config.pokedex);
-  const slotIndex = activeSlotIndex(state);
-  const radius = clickRadius(state.bastionUpgrades);
-  const baseDmg =
-    CLICK_BASE_DAMAGE * clickDamageMultiplier(state.bastionUpgrades) * (1 + bonuses.clickDamage);
-  const attacker = attackerOf(active, active.types);
+  const speed = PROJECTILE_SPEED[active.pattern];
+  const bounce =
+    active.pattern === AttackPattern.CHAIN && starsOf(active) >= STAR_PATTERN
+      ? CHAIN_EXTRA_BOUNCES_AT_MAX_PATTERN
+      : 0;
+  const p = createProjectileAtPoint(maxEntityId(state) + 1, active, click.x, click.y, speed, bounce);
 
-  const enemies = state.enemies.map((e) => ({ ...e }));
-  const damagePerSlot = [...state.runStats.damagePerSlot];
-  const floatingTexts = [...state.floatingTexts];
-  let nextTextId = maxEntityId(state) + 1;
-  let gold = state.gold;
-  let totalKills = state.runStats.totalKills;
-  let totalGold = state.runStats.totalGoldEarned;
-  let totalDamage = state.runStats.totalDamageDealt;
-  let remaining = state.waveEnemiesRemaining;
-  let manualClicks = state.runStats.manualClicks ?? 0;
-  let autoClicks = state.runStats.autoClicks ?? 0;
-  let defeatedBossFloors = state.runStats.defeatedBossFloors ? [...state.runStats.defeatedBossFloors] : [];
-  if (click.isAuto) {
-    autoClicks += 1;
-  } else {
-    manualClicks += 1;
-  }
+  const fx = createEffect(p.id + 1, 'RING', active.types[0], click.x, click.y, {
+    radius: 14,
+    maxAge: 0.22,
+  });
 
-  for (const enemy of enemies) {
-    if (!enemy.alive) continue;
-    const dx = enemy.x - click.x;
-    const dy = enemy.y - click.y;
-    if (dx * dx + dy * dy > radius * radius) continue;
-    const outcome = hitEnemy(enemy, baseDmg, attacker, state, rng, config, bonuses);
-    totalDamage += outcome.amount;
-    damagePerSlot[slotIndex] += outcome.amount;
-    floatingTexts.push(createFloatingText(nextTextId++, enemy.x, enemy.y, `${outcome.amount}`, '#ffffff'));
-    if (outcome.killed) {
-      totalKills += 1;
-      gold += outcome.goldGained;
-      totalGold += outcome.goldGained;
-      if (enemy.isBoss && !defeatedBossFloors.includes(state.floor)) {
-        defeatedBossFloors.push(state.floor);
-      }
-      remaining = Math.max(0, remaining - 1);
-      floatingTexts.push(createFloatingText(nextTextId++, enemy.x, enemy.y, `+${outcome.goldGained}`, '#ffd700'));
-    }
-  }
+  const manualClicks = (state.runStats.manualClicks ?? 0) + (click.isAuto ? 0 : 1);
+  const autoClicks = (state.runStats.autoClicks ?? 0) + (click.isAuto ? 1 : 0);
 
   return {
     ...state,
-    enemies: enemies.filter((e) => e.alive),
-    gold,
-    waveEnemiesRemaining: remaining,
-    floatingTexts,
+    projectiles: [...state.projectiles, p],
+    effects: [...(state.effects ?? []), fx],
     runStats: {
       ...state.runStats,
-      totalKills,
-      totalGoldEarned: totalGold,
-      totalDamageDealt: totalDamage,
-      damagePerSlot,
       manualClicks,
       autoClicks,
-      defeatedBossFloors,
     },
   };
 }
@@ -890,7 +872,7 @@ function stepOnce(state: GameState, config: GameConfig, rng: () => number): Game
   if (bastionHp > 0 && !inBreak) {
     bastionHp = Math.min(
       state.bastionMaxHp,
-      bastionHp + state.bastionMaxHp * (BASTION_REGEN_FRACTION_PER_SEC + bonuses.bastionRegen) * dt,
+      bastionHp + state.bastionMaxHp * (bastionRegenRate(state.bastionUpgrades) + bonuses.bastionRegen) * dt,
     );
   }
 
