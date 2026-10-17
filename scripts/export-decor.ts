@@ -1,12 +1,16 @@
 /**
- * Exporta los sprites decorativos procedurales a PNG editables en `public/decor/`.
+ * Exporta los sprites decorativos procedurales a Spritesheets PNG editables en `public/decor/`.
  *
- *   pnpm run export:decor                 → crea solo los PNG que NO existan (no pisa tus ediciones)
- *   pnpm run export:decor -- --force      → regenera todos (¡sobrescribe tus ediciones!)
- *   pnpm run export:decor -- --only=ruta_verde/   → solo los nombres que empiecen así
+ *   pnpm run export:decor                 → genera solo las hojas que NO existan (no pisa tus ediciones)
+ *   pnpm run export:decor -- --force      → regenera todas las hojas (¡sobrescribe tus ediciones!)
+ *   pnpm run export:decor -- --only=ruta_verde  → solo la hoja indicada
  *
- * En ejecución el juego usa el PNG si existe y, si no, el sprite procedural (ver
- * src/renderer/decorSprites.ts). Para volver al original de un sprite, borra su PNG.
+ * Cada bioma tiene su propia hoja PNG (ej. `ruta_verde.png`, `monte_igneo.png`) con
+ * separación de 4 px entre sprites y organización en filas por tamaño/categoría,
+ * facilitando su edición directa en Aseprite, Photoshop, etc.
+ *
+ * Genera además `public/decor/decor_atlas.json` y `src/renderer/decorAtlas.ts` con las
+ * coordenadas y dimensiones exactas de cada sprite.
  */
 
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
@@ -14,11 +18,13 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { deflateSync } from 'node:zlib';
 import { DECOR_CATALOG } from '../src/renderer/decorCatalog';
+import type { DecorName } from '../src/renderer/decorCatalog';
 import { toRgba } from '../src/renderer/pixelArt';
-import type { PixelBuffer } from '../src/renderer/pixelArt';
+import { PixelBuffer } from '../src/renderer/pixelArt';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const OUT_DIR = join(ROOT, 'public', 'decor');
+const ATLAS_TS_PATH = join(ROOT, 'src', 'renderer', 'decorAtlas.ts');
 
 const CRC_TABLE = (() => {
   const t = new Uint32Array(256);
@@ -71,20 +77,174 @@ export function encodePng(buf: PixelBuffer): Buffer {
   ]);
 }
 
+/** Disposición en filas lógicas de cada bioma para máxima claridad al editar en Aseprite. */
+export const SHEET_LAYOUT: Record<string, string[][]> = {
+  ruta_verde: [
+    ['tree_a', 'tree_b', 'pine'],
+    ['bush_a', 'bush_b', 'bush_berries', 'sign', 'rock'],
+    [
+      'flowers_a',
+      'flowers_b',
+      'micro_grass_a',
+      'micro_grass_b',
+      'micro_flower_red',
+      'micro_flower_white',
+      'micro_flower_yellow',
+      'micro_flower_blue',
+      'micro_pebble',
+    ],
+  ],
+  cueva_umbria: [
+    ['crystals_a', 'crystals_b', 'stalagmite_tall_a', 'stalagmite_tall_b'],
+    ['stalagmite_short_a', 'stalagmite_short_b', 'boulder_a', 'boulder_b', 'glow_shroom'],
+    ['micro_shard', 'micro_crack', 'micro_pebble'],
+  ],
+  monte_igneo: [
+    ['lava_pool_a', 'lava_pool_b', 'dead_tree_a', 'dead_tree_b'],
+    ['lava_rock_a', 'lava_rock_b', 'lava_rock_c', 'lava_rock_d'],
+    ['micro_crack', 'micro_pebble', 'micro_ember'],
+  ],
+  costa_ruinas: [
+    ['palm', 'column_full', 'column_broken_a', 'column_broken_b'],
+    ['tide_pool_a', 'tide_pool_b'],
+    ['starfish', 'shell', 'micro_ripple', 'micro_pebble'],
+  ],
+  common: [['platform']],
+};
+
+const PADDING = 4;
 const force = process.argv.includes('--force');
 const only = process.argv.find((a) => a.startsWith('--only='))?.slice('--only='.length);
 
-let written = 0;
-let skipped = 0;
-for (const [name, build] of Object.entries(DECOR_CATALOG) as Array<[string, () => PixelBuffer]>) {
-  if (only && !name.startsWith(only)) continue;
-  const file = join(OUT_DIR, `${name}.png`);
-  if (existsSync(file) && !force) {
-    skipped++;
+mkdirSync(OUT_DIR, { recursive: true });
+
+interface FrameInfo {
+  sheet: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+interface SheetMeta {
+  w: number;
+  h: number;
+  file: string;
+}
+
+const atlas = {
+  sheets: {} as Record<string, SheetMeta>,
+  frames: {} as Record<string, FrameInfo>,
+};
+
+let writtenSheets = 0;
+let skippedSheets = 0;
+
+for (const [sheetName, rows] of Object.entries(SHEET_LAYOUT)) {
+  if (only && sheetName !== only) continue;
+
+  // 1. Calcular dimensiones y posiciones
+  let maxW = 0;
+  let totalH = PADDING;
+  interface ItemPos {
+    key: string;
+    buffer: PixelBuffer;
+    x: number;
+    y: number;
+  }
+  const rowPlacements: ItemPos[] = [];
+
+  for (const row of rows) {
+    let curX = PADDING;
+    let rowH = 0;
+    for (const name of row) {
+      const key = `${sheetName}/${name}` as DecorName;
+      const builder = DECOR_CATALOG[key];
+      if (!builder) {
+        throw new Error(`Sprite no encontrado en DECOR_CATALOG: ${key}`);
+      }
+      const buf = builder();
+      rowPlacements.push({ key, buffer: buf, x: curX, y: totalH });
+      atlas.frames[key] = {
+        sheet: sheetName,
+        x: curX,
+        y: totalH,
+        w: buf.w,
+        h: buf.h,
+      };
+      curX += buf.w + PADDING;
+      rowH = Math.max(rowH, buf.h);
+    }
+    maxW = Math.max(maxW, curX);
+    totalH += rowH + PADDING;
+  }
+
+  atlas.sheets[sheetName] = {
+    w: maxW,
+    h: totalH,
+    file: `${sheetName}.png`,
+  };
+
+  const outFile = join(OUT_DIR, `${sheetName}.png`);
+  if (existsSync(outFile) && !force) {
+    skippedSheets++;
     continue;
   }
-  mkdirSync(dirname(file), { recursive: true });
-  writeFileSync(file, encodePng(build()));
-  written++;
+
+  // 2. Empaquetar sprites en el PixelBuffer de la hoja
+  const sheetBuffer = new PixelBuffer(maxW, totalH);
+  for (const item of rowPlacements) {
+    for (let py = 0; py < item.buffer.h; py++) {
+      for (let px = 0; px < item.buffer.w; px++) {
+        const c = item.buffer.get(px, py);
+        if (c) sheetBuffer.set(item.x + px, item.y + py, c);
+      }
+    }
+  }
+
+  writeFileSync(outFile, encodePng(sheetBuffer));
+  writtenSheets++;
 }
-console.log(`decor: ${written} PNG escritos, ${skipped} existentes conservados → ${OUT_DIR}`);
+
+// 3. Escribir atlas JSON y TS
+const atlasJsonPath = join(OUT_DIR, 'decor_atlas.json');
+writeFileSync(atlasJsonPath, JSON.stringify(atlas, null, 2), 'utf-8');
+
+const tsContent = `/**
+ * PokéBastion — Atlas de sprites decorativos por bioma.
+ * Define la posición (x, y) y dimensiones (w, h) de cada sprite dentro de su spritesheet.
+ * Cada bioma tiene su propia hoja PNG en \`public/decor/<sheet>.png\`.
+ */
+
+import type { DecorName } from './decorCatalog';
+
+export type DecorSheetName = 'ruta_verde' | 'cueva_umbria' | 'monte_igneo' | 'costa_ruinas' | 'common';
+
+export interface DecorFrame {
+  sheet: DecorSheetName;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+export interface SheetInfo {
+  w: number;
+  h: number;
+  file: string;
+}
+
+export interface DecorAtlas {
+  sheets: Record<DecorSheetName, SheetInfo>;
+  frames: Record<DecorName, DecorFrame>;
+}
+
+export const DECOR_ATLAS: DecorAtlas = ${JSON.stringify(atlas, null, 2)};
+`;
+
+writeFileSync(ATLAS_TS_PATH, tsContent, 'utf-8');
+
+console.log(
+  `decor spritesheets: ${writtenSheets} hojas escritas, ${skippedSheets} existentes conservadas → ${OUT_DIR}`,
+);
+console.log(`atlas actualizado: ${Object.keys(atlas.frames).length} frames registrados.`);

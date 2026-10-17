@@ -93,4 +93,19 @@ describe('sprites decorativos: PNG editable con fallback procedural', () => {
       expect(name.includes('/')).toBe(true);
     }
   });
+
+  it('el atlas de spritesheets cubre todos los elementos del catálogo con dimensiones válidas', async () => {
+    const { DECOR_ATLAS } = await import('./decorAtlas');
+    const { DECOR_CATALOG } = await import('./decorCatalog');
+    for (const name of Object.keys(DECOR_CATALOG)) {
+      const frame = DECOR_ATLAS.frames[name as keyof typeof DECOR_CATALOG];
+      expect(frame).toBeDefined();
+      expect(frame.w).toBeGreaterThan(0);
+      expect(frame.h).toBeGreaterThan(0);
+      expect(frame.x).toBeGreaterThanOrEqual(0);
+      expect(frame.y).toBeGreaterThanOrEqual(0);
+      expect(DECOR_ATLAS.sheets[frame.sheet]).toBeDefined();
+    }
+  });
 });
+

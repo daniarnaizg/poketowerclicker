@@ -11,7 +11,7 @@ We express our deepest gratitude to the artists, animators, and maintainers of t
 
 ## Arte decorativo, cursores y audio
 
-- **Decoración del terreno** (árboles, cristales, lava, palmeras, columnas, etc.), **cursores** y **efectos de clic** son pixel-art original generado proceduralmente por el propio código (`src/renderer/decor.ts`, `pixelArt.ts`) y exportado a PNG editables en `public/decor/` (ver `docs/DECOR_SPRITES.md`), inspirado en el estilo visual de la serie Pokémon.
+- **Decoración del terreno** (árboles, cristales, lava, palmeras, columnas, etc.), **cursores** y **efectos de clic** son pixel-art original generado proceduralmente por el propio código (`src/renderer/decor.ts`, `pixelArt.ts`) y exportado a spritesheets PNG editables por bioma en `public/decor/` (ver `docs/DECOR_SPRITES.md`), inspirado en el estilo visual de la serie Pokémon.
 - **Efectos de sonido y música** son composiciones originales sintetizadas en tiempo real con Web Audio (`src/audio/`); no se usa ningún sample ni melodía de la serie.
 
 ## Trademark Notice
