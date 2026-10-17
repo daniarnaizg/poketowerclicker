@@ -79,23 +79,28 @@ export const PROJECTILE_BASE_DAMAGE = 60;
 export const CLICK_BASE_DAMAGE = 60;
 /** Held-click repeat interval (ms): caps hold-to-fire at 4 clicks/s. */
 export const HOLD_FIRE_INTERVAL_MS = 250;
-/** UP_ARROW: +8% projectile damage per level. */
-export const ARROW_DAMAGE_PER_LEVEL = 0.08;
+/** UP_ARROW: +10% projectile damage per level. */
+export const ARROW_DAMAGE_PER_LEVEL = 0.10;
 /** UP_CRIT: +1% crit chance per level. */
 export const CRIT_CHANCE_PER_UP_CRIT = 0.01;
 export const CRIT_CHANCE_CAP = 0.9;
-/** UP_SPD: +5% attack speed per level. */
-export const SPD_PER_LEVEL = 0.05;
+/** Base attack speed multiplier when UP_SPD is first unlocked (level 1). */
+export const AUTO_SPD_BASE_MULT = 0.5;
+/** UP_SPD: +12% attack speed per level above 1. */
+export const SPD_PER_LEVEL = 0.12;
 /** UP_GOLD: +10% gold per level. */
 export const GOLD_PER_LEVEL = 0.10;
-/** UP_HP: +20 max bastion HP per level; passive regen 3%/s (PRD §4.1). */
-export const HP_PER_LEVEL = 20;
-/** UP_WALL: +10% max bastion HP per level (with a matching heal). */
-export const WALL_HP_PER_LEVEL = 0.1;
+/** UP_HP: +25 max bastion HP per level. */
+export const HP_PER_LEVEL = 25;
+/** UP_WALL (Regeneración): +0.5% max HP/s regen per level. */
+export const REGEN_PER_LEVEL = 0.005;
+/** Alias for backward compatibility. */
+export const WALL_HP_PER_LEVEL = REGEN_PER_LEVEL;
 export const BASTION_BASE_HP = 130;
-export const BASTION_REGEN_FRACTION_PER_SEC = 0.03;
-/** UP_MULTI: extra shots/bounces per level, capped (PRD: 1 to 9). */
-export const MULTI_MAX = 9;
+export const BASTION_REGEN_FRACTION_PER_SEC = 0.01;
+/** UP_MULTI: max upgrade level (4) and max simultaneous shots/bounces (5). */
+export const MULTI_MAX_LEVEL = 4;
+export const MULTI_MAX = 5;
 
 /** Crit damage multiplier including UP_CDMG (+10% of base critDmg per level). */
 export function critMultiplier(baseCritDmg: number, upCdmgLevel: number): number {
@@ -111,19 +116,30 @@ export const AUTOCLICK_MAX_LEVEL = 5;
  * Generic geometric curve; per-upgrade base costs below.
  */
 const UPGRADE_BASE_COST: Record<BastionUpgradeId, number> = {
-  UP_CLICK: 15,
+  UP_ARROW: 20,
+  UP_SPD: 25,
+  UP_MULTI: 150,
+  UP_CRIT: 35,
+  UP_CDMG: 40,
+  UP_AUTOCLICK: 100,
   UP_HP: 20,
-  UP_MULTI: 120,
-  UP_ARROW: 25,
-  UP_SPD: 30,
-  UP_CRIT: 40,
-  UP_CDMG: 45,
   UP_GOLD: 50,
   UP_WALL: 60,
-  UP_AUTOCLICK: 25,
 };
 
+export function upgradeMaxLevel(id: BastionUpgradeId): number | undefined {
+  if (id === 'UP_MULTI') return MULTI_MAX_LEVEL;
+  if (id === 'UP_AUTOCLICK') return AUTOCLICK_MAX_LEVEL;
+  return undefined;
+}
+
 export function upgradeCost(id: BastionUpgradeId, currentLevel: number): number {
+  if (id === 'UP_MULTI') {
+    return Math.floor(150 * Math.pow(3.2, currentLevel));
+  }
+  if (id === 'UP_AUTOCLICK') {
+    return Math.floor(100 * Math.pow(2.8, currentLevel));
+  }
   return Math.floor(UPGRADE_BASE_COST[id] * Math.pow(1.35, currentLevel));
 }
 
@@ -319,12 +335,15 @@ export const BALANCE = Object.freeze({
   ARROW_DAMAGE_PER_LEVEL,
   CRIT_CHANCE_PER_UP_CRIT,
   CRIT_CHANCE_CAP,
+  AUTO_SPD_BASE_MULT,
   SPD_PER_LEVEL,
   GOLD_PER_LEVEL,
   HP_PER_LEVEL,
+  REGEN_PER_LEVEL,
   WALL_HP_PER_LEVEL,
   BASTION_BASE_HP,
   BASTION_REGEN_FRACTION_PER_SEC,
+  MULTI_MAX_LEVEL,
   MULTI_MAX,
   RUNE_DAMAGE_BONUS,
   SWITCH_IN_RADIUS,

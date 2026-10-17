@@ -10,7 +10,7 @@ import type { BastionUpgrades, Cooldowns6, Enemy, GameConfig, GameState, Loadout
 import { PokemonType } from '../types';
 
 const config: GameConfig = { pokedex: POKEDEX, typeChart: TYPE_CHART, seed: 1 };
-const ZERO: BastionUpgrades = { UP_CLICK: 0, UP_HP: 0, UP_MULTI: 0, UP_ARROW: 0, UP_SPD: 0, UP_CRIT: 0, UP_CDMG: 0, UP_GOLD: 0, UP_WALL: 0 };
+const ZERO: BastionUpgrades = { UP_HP: 0, UP_MULTI: 0, UP_ARROW: 0, UP_SPD: 0, UP_CRIT: 0, UP_CDMG: 0, UP_GOLD: 0, UP_WALL: 0 };
 
 function mulberry32(seed: number): () => number {
   let a = seed;

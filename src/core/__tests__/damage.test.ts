@@ -6,7 +6,6 @@ import { getStatMultiplier } from '../teamLevel';
 import { CRIT_CHANCE_CAP } from '../../config/balance.config';
 
 const NO_UPGRADES: BastionUpgrades = {
-  UP_CLICK: 0,
   UP_HP: 0,
   UP_MULTI: 0,
   UP_ARROW: 0,
@@ -160,7 +159,7 @@ describe('calculateDamage — scaling', () => {
     expect(at11.amount).toBe(at1.amount * getStatMultiplier(11));
   });
 
-  it('applies UP_ARROW (+8% projectile damage per level)', () => {
+  it('applies UP_ARROW (+10% projectile damage per level)', () => {
     const hit = calculateDamage(
       { atk: 50, critRate: 0, critDmg: 2, types: [PokemonType.Normal] },
       defender([PokemonType.Normal]),
@@ -169,6 +168,6 @@ describe('calculateDamage — scaling', () => {
       { ...NO_UPGRADES, UP_ARROW: 1 },
       neverCrit,
     );
-    expect(hit.amount).toBe(108);
+    expect(hit.amount).toBe(110);
   });
 });

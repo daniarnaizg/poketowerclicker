@@ -121,12 +121,13 @@ export function computeTeamBonuses(
 /**
  * Damage multiplier for an attack carrying `attackerTypes`: all-damage plus the
  * type bonus of each distinct attacker type, applied additively.
+ * Also includes clickDamage bonus so CLICK_DAMAGE passives seamlessly boost all projectiles.
  */
 export function damageBonusMultiplier(
   bonuses: TeamBonuses,
   attackerTypes: readonly PokemonType[],
 ): number {
-  let extra = bonuses.allDamage;
+  let extra = bonuses.allDamage + bonuses.clickDamage;
   for (const t of new Set(attackerTypes)) extra += bonuses.typeDamage[t] ?? 0;
   return 1 + extra;
 }

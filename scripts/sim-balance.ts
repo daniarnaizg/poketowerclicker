@@ -20,6 +20,9 @@ import {
   teamLevelCost,
   upgradeCost,
 } from '../src/config/balance.config';
+import {
+  calculateUpgradeCost,
+} from '../src/core/bastionUpgrades';
 import { mulberry32 } from '../src/core/rng';
 import { BASTION_UPGRADE_IDS } from '../src/core/types';
 import type { BastionUpgradeId, GameConfig, GameState } from '../src/core/types';
@@ -35,7 +38,7 @@ function initialState(): GameState {
     bastionHp: BASTION_BASE_HP,
     bastionMaxHp: BASTION_BASE_HP,
     bastionUpgrades: {
-      UP_CLICK: 0, UP_HP: 0, UP_MULTI: 0, UP_ARROW: 0, UP_SPD: 0,
+      UP_HP: 0, UP_MULTI: 0, UP_ARROW: 0, UP_SPD: 0,
       UP_CRIT: 0, UP_CDMG: 0, UP_GOLD: 0, UP_WALL: 0, UP_AUTOCLICK: 0,
     },
     enemies: [],
@@ -103,24 +106,34 @@ function runSim(opts: RunOptions): RunResult {
   while (s.phase === 'PLAYING' && s.runStats.durationSec < maxSec) {
     const input: Parameters<typeof tickGame>[1] = {};
 
-    // Purchase logic every 30 frames (0.5s)
-    if (frame % 30 === 0) {
-      const ids: BastionUpgradeId[] =
-        opts.policy === 'focus'
-          ? ['UP_ARROW', 'UP_SPD', 'UP_CRIT', 'UP_CDMG', 'UP_MULTI', 'UP_HP', 'UP_AUTOCLICK']
-          : [...BASTION_UPGRADE_IDS];
-      const upgradeOptions: { id: BastionUpgradeId | 'TEAM'; cost: number }[] = [
-        { id: 'TEAM', cost: teamLevelCost(s.teamLevel) },
-        ...ids.map((id) => ({ id, cost: upgradeCost(id, s.bastionUpgrades[id] ?? 0) })),
-      ].sort((a, b) => a.cost - b.cost);
+    // Purchase logic every 5 frames (83ms)
+    if (frame % 5 === 0) {
+      const spdCost = calculateUpgradeCost('UP_SPD', s.bastionUpgrades.UP_SPD);
+      // In 0-cps idle, prioritize autonomous projectile cadence (UP_SPD) early to stop lethal enemy leaks
+      if (opts.cps === 0 && s.bastionUpgrades.UP_SPD < 5) {
+        if (s.gold >= spdCost) {
+          input.buyUpgrade = 'UP_SPD';
+        }
+      } else {
+        const ids: BastionUpgradeId[] =
+          opts.policy === 'focus'
+            ? ['UP_ARROW', 'UP_SPD', 'UP_CRIT', 'UP_CDMG', 'UP_MULTI', 'UP_HP', 'UP_AUTOCLICK']
+            : [...BASTION_UPGRADE_IDS];
+        const upgradeOptions: { id: BastionUpgradeId | 'TEAM'; cost: number }[] = [
+          { id: 'TEAM', cost: teamLevelCost(s.teamLevel) },
+          ...ids.map((id) => ({ id, cost: calculateUpgradeCost(id, s.bastionUpgrades[id] ?? 0) })),
+        ]
+          .filter((u) => isFinite(u.cost))
+          .sort((a, b) => a.cost - b.cost);
 
-      if (s.gold >= upgradeOptions[0].cost) {
-        if (upgradeOptions[0].id === 'TEAM') input.buyTeamLevel = true;
-        else input.buyUpgrade = upgradeOptions[0].id;
+        if (upgradeOptions.length > 0 && s.gold >= upgradeOptions[0].cost) {
+          if (upgradeOptions[0].id === 'TEAM') input.buyTeamLevel = true;
+          else input.buyUpgrade = upgradeOptions[0].id;
+        }
       }
     }
 
-    // Aimed clicks
+    // Aimed clicks (only when opts.cps > 0; 0-cps idle does zero manual clicks)
     if (opts.cps > 0 && frame % Math.round(60 / opts.cps) === 0) {
       const target = s.enemies
         .filter((e) => e.alive)
@@ -129,8 +142,8 @@ function runSim(opts: RunOptions): RunResult {
     }
 
     // Trigger ultimate when full
-    if (s.ultimateMax > 0 && s.ultimateCharge >= s.ultimateMax) {
-      input.triggerUltimate = true;
+    if (s.ultimateMax > 0 && s.ultimateCharge >= s.ultimateMax && s.enemies.some((e) => e.alive)) {
+      input.useUltimate = true;
     }
 
     const nextState = tickGame(s, input, cfg, dtMs, rng);

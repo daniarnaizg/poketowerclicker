@@ -22,7 +22,7 @@ export function describePassive(stat: string, value: number): string {
     case 'CRIT_RATE': return `${v} prob. de crítico`;
     case 'ATTACK_SPEED': return `${v} velocidad de ataque`;
     case 'GOLD': return `${v} oro por baja`;
-    case 'CLICK_DAMAGE': return `${v} daño de clic`;
+    case 'CLICK_DAMAGE': return `${v} daño de proyectil`;
     case 'ULT_CHARGE': return `${v} carga de Definitiva`;
     case 'BASTION_REGEN': return `${v} regeneración del Bastión/s`;
     default: return `${v} ${stat}`;

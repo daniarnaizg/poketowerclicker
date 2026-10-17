@@ -13,7 +13,6 @@ function makeState(phase: GameState['phase']): GameState {
     bastionHp: 100,
     bastionMaxHp: 100,
     bastionUpgrades: {
-      UP_CLICK: 0,
       UP_HP: 0,
       UP_MULTI: 0,
       UP_ARROW: 0,
