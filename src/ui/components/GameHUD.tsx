@@ -5,6 +5,7 @@
 import { BOSS_TIMER_DURATION } from '../../config/balance.config';
 import type { GameState } from '../../core/types';
 import { POKEDEX } from '../../data/pokemon';
+import { AudioToggle } from './AudioToggle';
 
 interface Props {
   gameState: GameState;
@@ -76,6 +77,7 @@ export function GameHUD({ gameState, onUltimate, onToggleAutoAdvance, onStartNex
               : 'SIGUIENTE PISO'
             : `PISO ${gameState.floor}`}
         </button>
+        <AudioToggle />
       </div>
 
       <div class="flex items-center gap-2 text-[9px]">

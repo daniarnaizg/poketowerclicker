@@ -9,6 +9,11 @@ The Pokémon animated spritesheets (`Walk-Anim.png`, `Idle-Anim.png`, `Attack-An
 
 We express our deepest gratitude to the artists, animators, and maintainers of the SpriteCollab project for their extraordinary dedication and high-quality pixel art.
 
+## Arte decorativo, cursores y audio
+
+- **Decoración del terreno** (árboles, cristales, lava, palmeras, columnas, etc.), **cursores** y **efectos de clic** son pixel-art original generado proceduralmente por el propio código (`src/renderer/decor.ts`, `pixelArt.ts`), inspirado en el estilo visual de la serie Pokémon.
+- **Efectos de sonido y música** son composiciones originales sintetizadas en tiempo real con Web Audio (`src/audio/`); no se usa ningún sample ni melodía de la serie.
+
 ## Trademark Notice
 
 Pokémon and Pokémon Mystery Dungeon are registered trademarks and copyrights of **Nintendo**, **Creatures Inc.**, and **GAME FREAK inc.**

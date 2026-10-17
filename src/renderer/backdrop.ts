@@ -1,515 +1,267 @@
 /**
- * PokéBastion — Procedural pixel-art backdrop renderer (PRD §5.2, Block 3A.4).
- * Builds a 384×384 cached canvas per biome with 4 distinct visual layers:
- *   Layer 1: 32px tiled checkerboard ground.
- *   Layer 2: Deterministic micro-decorations (grass tufts, pebbles, cracks, specks).
- *   Layer 3: Corner macro-decorations outside radius 192:
- *     - RUTA_VERDE: pixel-art trees & leafy bushes.
- *     - CUEVA_UMBRIA: jagged stalagmites & glowing crystal clusters (#8a6fd0).
- *     - MONTE_IGNEO: dark volcanic crags & molten lava pool accents (#f08030).
- *     - COSTA_RUINAS: palm trees & broken marble ruin columns (#58a8d8).
- *   Layer 4: Central Bastion platform (radius 48 circle with subtle contrast & dashed border).
+ * PokéBastion — Procedural pixel-art backdrop renderer.
+ * Builds a 384×384 cached canvas per biome:
+ *   Layer 1: terreno continuo (sin cuadrícula): color base + manchas orgánicas
+ *            de bajo contraste con bordes tramados (dither), como un mapa GBA.
+ *   Layer 2: micro-decoración dispersa (matas, flores, guijarros, grietas...).
+ *   Layer 3: decoración de esquina (árboles, cristales, lava, palmeras...) con
+ *            sprites pixel-art estilo Pokémon, ordenados por profundidad (Y).
+ *   Layer 4: plataforma central del Bastión con emblema de Poké Ball.
+ *
+ * Todo se pinta solo con `fillRect` (tramos horizontales), así que es nítido a
+ * cualquier escala y testeable con un mock mínimo de contexto 2D.
  */
 
 import { ARENA } from '../config/arena.config';
-import type { BiomeDefinition } from '../core/types';
+import type { BiomeDefinition, BiomeId } from '../core/types';
+import * as Decor from './decor';
+import { PixelBuffer, blit, hash2, mix, valueNoise } from './pixelArt';
 
-const FULL_CIRCLE = Math.PI * 2;
-const TILE = 32;
-const TILES_PER_ROW = ARENA.SIZE / TILE; // 384 / 32 = 12
+const SIZE = ARENA.SIZE; // 384
 const CENTER = ARENA.CENTER; // 192
+const MICRO_CELL = 24;
 
-/** Fast deterministic pseudo-random generator based on integer coordinates and seed. */
-function tileHash(x: number, y: number, seed = 0): number {
-  let h = (x * 374761393 + y * 668265263 + seed * 1013904223) ^ 0x5bf03635;
-  h = Math.imul(h ^ (h >>> 13), 1274126177);
-  return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+// ---------------------------------------------------------------------------
+// Layer 1: terreno continuo
+// ---------------------------------------------------------------------------
+
+/** 0 = base, 1 = mancha oscura, 2 = mancha clara. */
+function groundClass(x: number, y: number, seed: number): 0 | 1 | 2 {
+  // Dos octavas de ruido; el hash por píxel tramado ("dither") rompe el borde recto.
+  const n = valueNoise(x, y, 56, seed) * 0.65 + valueNoise(x, y, 22, seed + 17) * 0.35;
+  const jitter = (hash2(x, y, seed + 5) - 0.5) * 0.05 + (((x + y) & 1) === 0 ? 0.012 : -0.012);
+  const v = n + jitter;
+  if (v > 0.6) return 1;
+  if (v < 0.37) return 2;
+  return 0;
 }
 
-// ---------------------------------------------------------------------------
-// Layer 2: Micro-decorations (grass, pebbles, cracks, embers)
-// ---------------------------------------------------------------------------
-
-function drawMicroDecorations(ctx: CanvasRenderingContext2D, biome: BiomeDefinition): void {
-  for (let ty = 0; ty < TILES_PER_ROW; ty++) {
-    for (let tx = 0; tx < TILES_PER_ROW; tx++) {
-      const v = tileHash(tx, ty, 1);
-      const ox = Math.floor(tileHash(tx, ty, 2) * (TILE - 12)) + 6;
-      const oy = Math.floor(tileHash(tx, ty, 3) * (TILE - 12)) + 6;
-      const px = tx * TILE + ox;
-      const py = ty * TILE + oy;
-
-      // Skip micro-decorations inside central platform radius (48px)
-      if (Math.hypot(px - CENTER, py - CENTER) < 52) continue;
-
-      switch (biome.id) {
-        case 'RUTA_VERDE': {
-          if (v > 0.42) {
-            // Grass blade tufts
-            ctx.fillStyle = '#4c8c2c';
-            ctx.fillRect(px, py, 2, 4);
-            ctx.fillRect(px - 2, py + 1, 2, 3);
-            ctx.fillRect(px + 2, py + 2, 2, 2);
-            ctx.fillStyle = '#98e058';
-            ctx.fillRect(px, py, 1, 2);
-          }
-          if (v > 0.82) {
-            // Tiny flower or pebble
-            const flower = v > 0.9;
-            ctx.fillStyle = flower ? (v > 0.95 ? '#f8d030' : '#ffffff') : '#6e6a5c';
-            ctx.fillRect(px + 5, py - 3, 3, 3);
-            if (flower) {
-              ctx.fillStyle = '#f08030';
-              ctx.fillRect(px + 6, py - 2, 1, 1);
-            }
-          }
-          break;
-        }
-
-        case 'CUEVA_UMBRIA': {
-          if (v > 0.45) {
-            // Small cavern stone / crack
-            ctx.fillStyle = '#1c182c';
-            ctx.fillRect(px, py, 4, 3);
-            ctx.fillRect(px + 1, py - 1, 2, 1);
-            ctx.fillStyle = '#4a3f62';
-            ctx.fillRect(px + 1, py, 2, 1);
-          }
-          if (v > 0.8) {
-            // Small glowing crystal shard
-            ctx.fillStyle = '#8a6fd0';
-            ctx.fillRect(px + 3, py + 2, 3, 4);
-            ctx.fillStyle = '#d4c4ff';
-            ctx.fillRect(px + 3, py + 2, 1, 2);
-          }
-          break;
-        }
-
-        case 'MONTE_IGNEO': {
-          if (v > 0.45) {
-            // Volcanic ground crack
-            ctx.fillStyle = '#2d140e';
-            ctx.fillRect(px, py, 5, 2);
-            ctx.fillRect(px + 2, py + 2, 3, 2);
-            ctx.fillStyle = '#4a2016';
-            ctx.fillRect(px + 1, py, 2, 1);
-          }
-          if (v > 0.8) {
-            // Glowing cinder / ember
-            ctx.fillStyle = '#f08030';
-            ctx.fillRect(px + 4, py - 2, 2, 2);
-            ctx.fillStyle = '#f8d030';
-            ctx.fillRect(px + 4, py - 2, 1, 1);
-          }
-          break;
-        }
-
-        case 'COSTA_RUINAS': {
-          if (v > 0.45) {
-            // Sand ripples / small seashell
-            ctx.fillStyle = '#b8a870';
-            ctx.fillRect(px, py, 5, 2);
-            ctx.fillRect(px + 2, py + 2, 3, 1);
-            ctx.fillStyle = '#f4e8c4';
-            ctx.fillRect(px + 1, py, 2, 1);
-          }
-          if (v > 0.8) {
-            // Weathered marble ruin fragment with cyan accent
-            ctx.fillStyle = '#7a766c';
-            ctx.fillRect(px + 3, py + 1, 3, 3);
-            ctx.fillStyle = '#58a8d8';
-            ctx.fillRect(px + 4, py + 2, 1, 1);
-          }
-          break;
-        }
+function paintGround(ctx: CanvasRenderingContext2D, biome: BiomeDefinition): void {
+  const { groundA, groundB } = biome.palette;
+  const colors = [
+    groundA,
+    mix(groundA, groundB, 0.42), // mancha algo más oscura
+    mix(groundA, '#ffffff', 0.05), // mancha algo más clara
+  ];
+  const seed = biome.id.length * 31 + biome.id.charCodeAt(2);
+  ctx.fillStyle = colors[0];
+  ctx.fillRect(0, 0, SIZE, SIZE);
+  for (let y = 0; y < SIZE; y++) {
+    let x = 0;
+    while (x < SIZE) {
+      const cls = groundClass(x, y, seed);
+      let run = 1;
+      while (x + run < SIZE && groundClass(x + run, y, seed) === cls) run++;
+      if (cls !== 0) {
+        ctx.fillStyle = colors[cls];
+        ctx.fillRect(x, y, run, 1);
       }
+      x += run;
     }
   }
 }
 
 // ---------------------------------------------------------------------------
-// Layer 3: Corner Macro-Decorations (outside radius 192)
+// Layer 2: micro-decoración de suelo
 // ---------------------------------------------------------------------------
 
-/** RUTA_VERDE: Pixel-art tree */
-function drawPixelTree(ctx: CanvasRenderingContext2D, cx: number, cy: number): void {
-  // Trunk
-  ctx.fillStyle = '#42240c';
-  ctx.fillRect(cx - 3, cy + 6, 6, 12);
-  ctx.fillStyle = '#643815';
-  ctx.fillRect(cx - 1, cy + 6, 2, 12);
+type MicroKit = ReadonlyArray<{ upTo: number; sprites: readonly PixelBuffer[] }>;
 
-  // Canopy layers
-  const canopy = [
-    { dy: -4, r: 16, c: '#1c4a18' },
-    { dy: -8, r: 14, c: '#286822' },
-    { dy: -12, r: 12, c: '#3c8830' },
-    { dy: -16, r: 9, c: '#5cb844' },
-    { dy: -19, r: 5, c: '#84d868' },
-  ];
-  for (const layer of canopy) {
-    ctx.fillStyle = layer.c;
-    ctx.beginPath();
-    ctx.arc(cx, cy + layer.dy, layer.r, 0, FULL_CIRCLE);
-    ctx.fill();
+/** Kit por bioma: umbrales acumulados sobre un hash [0,1) → grupos de sprites. */
+function microKit(biome: BiomeDefinition): MicroKit {
+  switch (biome.id) {
+    case 'RUTA_VERDE':
+      return [
+        { upTo: 0.34, sprites: [Decor.buildGrassTuft('#4a9a30', '#a4ec64', 0), Decor.buildGrassTuft('#4a9a30', '#a4ec64', 1)] },
+        { upTo: 0.43, sprites: ['#f05868', '#ffffff', '#f8d838', '#68a8f8'].map((c) => Decor.buildTinyFlower(c)) },
+        { upTo: 0.47, sprites: [Decor.buildPebble('#6a6a64', '#9a9a90', '#c4c4b8')] },
+      ];
+    case 'CUEVA_UMBRIA':
+      return [
+        { upTo: 0.2, sprites: [Decor.buildPebble('#14101e', '#2c2540', '#4a4068')] },
+        { upTo: 0.34, sprites: [Decor.buildCrack('#14101e')] },
+        { upTo: 0.4, sprites: [Decor.buildCrystalShard()] },
+      ];
+    case 'MONTE_IGNEO':
+      return [
+        { upTo: 0.2, sprites: [Decor.buildCrack('#2d140e', '#f08030')] },
+        { upTo: 0.3, sprites: [Decor.buildEmber()] },
+        { upTo: 0.4, sprites: [Decor.buildPebble('#1c0e0a', '#38201a', '#5a382c')] },
+      ];
+    case 'COSTA_RUINAS':
+      return [
+        { upTo: 0.3, sprites: [Decor.buildSandRipple('#b8a870', '#f4e8c4')] },
+        { upTo: 0.34, sprites: [Decor.buildShell()] },
+        { upTo: 0.38, sprites: [Decor.buildPebble('#7a766c', '#a8a498', '#dcd8cc')] },
+      ];
   }
 }
 
-/** RUTA_VERDE: Pixel-art bush */
-function drawPixelBush(ctx: CanvasRenderingContext2D, cx: number, cy: number, r = 10): void {
-  ctx.fillStyle = '#1c4a18';
-  ctx.beginPath();
-  ctx.arc(cx, cy, r + 2, 0, FULL_CIRCLE);
-  ctx.fill();
-  ctx.fillStyle = '#2e7426';
-  ctx.beginPath();
-  ctx.arc(cx, cy - 1, r, 0, FULL_CIRCLE);
-  ctx.fill();
-  ctx.fillStyle = '#4ca438';
-  ctx.beginPath();
-  ctx.arc(cx - 2, cy - 3, r * 0.65, 0, FULL_CIRCLE);
-  ctx.fill();
-  ctx.fillStyle = '#7cd85c';
-  ctx.fillRect(cx - 3, cy - 5, 3, 3);
-}
-
-/** CUEVA_UMBRIA: Stalagmite spire */
-function drawStalagmite(ctx: CanvasRenderingContext2D, cx: number, cy: number, h: number, w = 10): void {
-  ctx.fillStyle = '#181424';
-  ctx.beginPath();
-  ctx.moveTo(cx - w, cy);
-  ctx.lineTo(cx, cy - h);
-  ctx.lineTo(cx + w, cy);
-  ctx.closePath();
-  ctx.fill();
-
-  ctx.fillStyle = '#2a223e';
-  ctx.beginPath();
-  ctx.moveTo(cx - Math.floor(w / 2), cy);
-  ctx.lineTo(cx, cy - h);
-  ctx.lineTo(cx + Math.floor(w / 2), cy);
-  ctx.closePath();
-  ctx.fill();
-
-  ctx.fillStyle = '#483c66';
-  ctx.fillRect(cx - 1, cy - Math.floor(h * 0.7), 2, Math.floor(h * 0.4));
-}
-
-/** CUEVA_UMBRIA: Glowing crystal cluster (#8a6fd0) */
-function drawCrystalCluster(ctx: CanvasRenderingContext2D, cx: number, cy: number): void {
-  // Soft purple glow
-  ctx.fillStyle = 'rgba(138, 111, 208, 0.22)';
-  ctx.beginPath();
-  ctx.arc(cx, cy - 8, 20, 0, FULL_CIRCLE);
-  ctx.fill();
-
-  const crystals = [
-    { ox: 0, oy: 0, w: 7, h: 22, rot: -0.05 },
-    { ox: -7, oy: 4, w: 5, h: 16, rot: -0.22 },
-    { ox: 7, oy: 3, w: 6, h: 18, rot: 0.2 },
-    { ox: -12, oy: 8, w: 4, h: 10, rot: -0.4 },
-  ];
-
-  for (const cr of crystals) {
-    ctx.save();
-    ctx.translate(cx + cr.ox, cy + cr.oy);
-    ctx.rotate(cr.rot);
-
-    // Dark crystal edge
-    ctx.fillStyle = '#543888';
-    ctx.beginPath();
-    ctx.moveTo(-cr.w, 0);
-    ctx.lineTo(0, -cr.h);
-    ctx.lineTo(cr.w, 0);
-    ctx.closePath();
-    ctx.fill();
-
-    // Body
-    ctx.fillStyle = '#8a6fd0';
-    ctx.beginPath();
-    ctx.moveTo(-cr.w + 2, 0);
-    ctx.lineTo(0, -cr.h + 2);
-    ctx.lineTo(cr.w - 1, 0);
-    ctx.closePath();
-    ctx.fill();
-
-    // Glint highlight
-    ctx.fillStyle = '#dfd4ff';
-    ctx.fillRect(-1, -cr.h + 3, 2, Math.floor(cr.h * 0.5));
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(0, -cr.h + 2, 1, 2);
-
-    ctx.restore();
+function drawMicroDecorations(ctx: CanvasRenderingContext2D, biome: BiomeDefinition): void {
+  const kit = microKit(biome);
+  const cells = Math.ceil(SIZE / MICRO_CELL);
+  for (let cy = 0; cy < cells; cy++) {
+    for (let cx = 0; cx < cells; cx++) {
+      const v = hash2(cx, cy, 1);
+      const group = kit.find((g) => v < g.upTo);
+      if (!group) continue;
+      const sprite = group.sprites[Math.floor(hash2(cx, cy, 4) * group.sprites.length)];
+      const px = cx * MICRO_CELL + 2 + Math.floor(hash2(cx, cy, 2) * (MICRO_CELL - 4 - sprite.w));
+      const py = cy * MICRO_CELL + 2 + Math.floor(hash2(cx, cy, 3) * (MICRO_CELL - 4 - sprite.h));
+      // La zona de la plataforma central se deja limpia.
+      if (Math.hypot(px + sprite.w / 2 - CENTER, py + sprite.h / 2 - CENTER) < 56) continue;
+      blit(ctx, sprite, px, py);
+    }
   }
 }
 
-/** MONTE_IGNEO: Molten lava pool accent (#f08030) */
-function drawLavaPool(ctx: CanvasRenderingContext2D, cx: number, cy: number, rx = 24, ry = 18): void {
-  // Lava glow
-  ctx.fillStyle = 'rgba(240, 128, 48, 0.28)';
-  ctx.beginPath();
-  ctx.ellipse(cx, cy, rx + 10, ry + 8, 0, 0, FULL_CIRCLE);
-  ctx.fill();
+// ---------------------------------------------------------------------------
+// Layer 3: decoración de esquina
+// ---------------------------------------------------------------------------
 
-  // Dark scorched perimeter
-  ctx.fillStyle = '#1e0c08';
-  ctx.beginPath();
-  ctx.ellipse(cx, cy, rx + 4, ry + 4, 0, 0, FULL_CIRCLE);
-  ctx.fill();
-
-  // Deep molten magma
-  ctx.fillStyle = '#9e240a';
-  ctx.beginPath();
-  ctx.ellipse(cx, cy, rx, ry, 0, 0, FULL_CIRCLE);
-  ctx.fill();
-
-  // Bright molten orange
-  ctx.fillStyle = '#f08030';
-  ctx.beginPath();
-  ctx.ellipse(cx, cy, rx * 0.72, ry * 0.68, 0, 0, FULL_CIRCLE);
-  ctx.fill();
-
-  // White-hot center
-  ctx.fillStyle = '#f8d848';
-  ctx.beginPath();
-  ctx.ellipse(cx, cy, rx * 0.4, ry * 0.35, 0, 0, FULL_CIRCLE);
-  ctx.fill();
+interface DecorItem {
+  sprite: PixelBuffer;
+  /** Centro del sprite respecto a la esquina (positivo = hacia dentro). */
+  dx: number;
+  dy: number;
 }
 
-/** MONTE_IGNEO: Dark lava rock */
-function drawLavaRock(ctx: CanvasRenderingContext2D, cx: number, cy: number, w = 18, h = 14): void {
-  ctx.fillStyle = '#140804';
-  ctx.beginPath();
-  ctx.ellipse(cx, cy, w / 2 + 1, h / 2 + 1, 0, 0, FULL_CIRCLE);
-  ctx.fill();
-
-  ctx.fillStyle = '#2d140e';
-  ctx.beginPath();
-  ctx.ellipse(cx, cy - 1, w / 2 - 1, h / 2 - 1, 0, 0, FULL_CIRCLE);
-  ctx.fill();
-
-  ctx.fillStyle = '#4a2218';
-  ctx.fillRect(cx - 2, cy - 3, Math.floor(w * 0.35), Math.floor(h * 0.3));
-
-  // Small molten crack in rock
-  ctx.fillStyle = '#f08030';
-  ctx.fillRect(cx - 1, cy, 3, 1);
-  ctx.fillRect(cx + 1, cy + 1, 2, 1);
-}
-
-/** COSTA_RUINAS: Broken marble column */
-function drawBrokenColumn(ctx: CanvasRenderingContext2D, cx: number, cy: number): void {
-  const w = 14;
-  const h = 26;
-
-  // Shadow base
-  ctx.fillStyle = '#48443e';
-  ctx.fillRect(cx - w / 2 - 2, cy + 2, w + 4, 6);
-
-  // Column base plinth
-  ctx.fillStyle = '#9c988c';
-  ctx.fillRect(cx - w / 2 - 2, cy, w + 4, 4);
-  ctx.fillStyle = '#dcd8cc';
-  ctx.fillRect(cx - w / 2 - 1, cy - 2, w + 2, 3);
-
-  // Fluted column body
-  ctx.fillStyle = '#9c988c';
-  ctx.fillRect(cx - w / 2, cy - h, w, h);
-
-  // Fluting vertical stripes
-  ctx.fillStyle = '#dedad0';
-  ctx.fillRect(cx - w / 2 + 2, cy - h, 3, h);
-  ctx.fillRect(cx + 2, cy - h, 3, h);
-
-  // Broken jagged top
-  ctx.fillStyle = '#48443e';
-  ctx.fillRect(cx - w / 2, cy - h, 4, 3);
-  ctx.fillRect(cx + 1, cy - h + 2, 3, 3);
-
-  // Subtle cyan ruin glyph / moss accent (#58a8d8)
-  ctx.fillStyle = '#58a8d8';
-  ctx.fillRect(cx - 1, cy - Math.floor(h * 0.5), 2, 4);
-  ctx.fillRect(cx - 3, cy - Math.floor(h * 0.5) + 1, 5, 2);
-}
-
-/** COSTA_RUINAS: Palm tree */
-function drawPalmTree(ctx: CanvasRenderingContext2D, cx: number, cy: number, flipX = false): void {
-  ctx.save();
-  if (flipX) {
-    ctx.translate(cx, cy);
-    ctx.scale(-1, 1);
-    ctx.translate(-cx, -cy);
+/** Dos plantillas por bioma (A para esquinas TL/BR, B para TR/BL) para dar variedad. */
+function cornerTemplates(id: BiomeId): [DecorItem[], DecorItem[]] {
+  const it = (sprite: PixelBuffer, dx: number, dy: number): DecorItem => ({ sprite, dx, dy });
+  switch (id) {
+    case 'RUTA_VERDE':
+      return [
+        [
+          it(Decor.buildTree(1), 28, 34),
+          it(Decor.buildBush(true, 1), 70, 20),
+          it(Decor.buildBush(false, 2), 22, 76),
+          it(Decor.buildFlowerPatch(1), 62, 58),
+          it(Decor.buildRock(1), 96, 14),
+        ],
+        [
+          it(Decor.buildPine(), 20, 32),
+          it(Decor.buildTree(2), 60, 36),
+          it(Decor.buildBush(false, 3), 100, 16),
+          it(Decor.buildFlowerPatch(2), 40, 80),
+          it(Decor.buildSign(), 94, 50),
+        ],
+      ];
+    case 'CUEVA_UMBRIA':
+      return [
+        [
+          it(Decor.buildCrystalCluster(1), 34, 40),
+          it(Decor.buildStalagmite(30, 1), 72, 24),
+          it(Decor.buildStalagmite(22, 2), 16, 80),
+          it(Decor.buildCaveBoulder(1), 76, 64),
+          it(Decor.buildGlowShroom(), 52, 84),
+        ],
+        [
+          it(Decor.buildStalagmite(30, 3), 22, 36),
+          it(Decor.buildCrystalCluster(2), 62, 36),
+          it(Decor.buildCaveBoulder(2), 20, 78),
+          it(Decor.buildGlowShroom(), 96, 16),
+          it(Decor.buildStalagmite(22, 4), 84, 62),
+        ],
+      ];
+    case 'MONTE_IGNEO':
+      return [
+        [
+          it(Decor.buildLavaPool(1), 42, 32),
+          it(Decor.buildLavaRock(1), 92, 18),
+          it(Decor.buildLavaRock(2), 18, 74),
+          it(Decor.buildDeadTree(1), 90, 60),
+        ],
+        [
+          it(Decor.buildDeadTree(2), 20, 44),
+          it(Decor.buildLavaRock(3), 56, 18),
+          it(Decor.buildLavaPool(2), 64, 62),
+          it(Decor.buildLavaRock(4), 16, 90),
+        ],
+      ];
+    case 'COSTA_RUINAS':
+      return [
+        [
+          it(Decor.buildColumn(true, 1), 22, 44),
+          it(Decor.buildColumn(false, 2), 54, 34),
+          it(Decor.buildTidePool(1), 72, 74),
+          it(Decor.buildStarfish(), 20, 88),
+          it(Decor.buildShell(), 96, 20),
+        ],
+        [
+          it(Decor.buildPalm(1), 36, 40),
+          it(Decor.buildColumn(true, 3), 78, 40),
+          it(Decor.buildShell(), 24, 92),
+          it(Decor.buildStarfish(), 92, 82),
+          it(Decor.buildTidePool(2), 62, 84),
+        ],
+      ];
   }
-
-  // Curved segmented trunk
-  ctx.strokeStyle = '#5c3818';
-  ctx.lineWidth = 5;
-  ctx.beginPath();
-  ctx.moveTo(cx, cy + 12);
-  ctx.quadraticCurveTo(cx - 6, cy - 10, cx + 4, cy - 26);
-  ctx.stroke();
-
-  ctx.strokeStyle = '#945c2c';
-  ctx.lineWidth = 3;
-  ctx.beginPath();
-  ctx.moveTo(cx, cy + 12);
-  ctx.quadraticCurveTo(cx - 6, cy - 10, cx + 4, cy - 26);
-  ctx.stroke();
-
-  // Palm fronds fanning out
-  const frondApexX = cx + 4;
-  const frondApexY = cy - 26;
-  const fronds = [
-    { dx: -18, dy: -8, c: '#2e7d32' },
-    { dx: -14, dy: -18, c: '#388e3c' },
-    { dx: 4, dy: -22, c: '#4caf50' },
-    { dx: 18, dy: -14, c: '#388e3c' },
-    { dx: 22, dy: -2, c: '#2e7d32' },
-    { dx: 14, dy: 6, c: '#1b5e20' },
-  ];
-
-  for (const f of fronds) {
-    ctx.strokeStyle = f.c;
-    ctx.lineWidth = 2.5;
-    ctx.beginPath();
-    ctx.moveTo(frondApexX, frondApexY);
-    ctx.quadraticCurveTo(
-      frondApexX + f.dx * 0.6,
-      frondApexY + f.dy * 0.5 - 4,
-      frondApexX + f.dx,
-      frondApexY + f.dy,
-    );
-    ctx.stroke();
-  }
-
-  // Azure coastal accent speck
-  ctx.fillStyle = '#58a8d8';
-  ctx.fillRect(frondApexX - 1, frondApexY - 1, 2, 2);
-
-  ctx.restore();
 }
 
 function drawCornerDecorations(ctx: CanvasRenderingContext2D, biome: BiomeDefinition): void {
-  // Corner anchor points outside radius 192 from center (192, 192)
-  // Corner centers at approx (32, 32), (352, 32), (32, 352), (352, 352).
-  // Distance from (192, 192) to (32, 32) is ~226.3 px (> 192).
-
-  switch (biome.id) {
-    case 'RUTA_VERDE': {
-      // Top-Left corner
-      drawPixelTree(ctx, 32, 32);
-      drawPixelBush(ctx, 58, 26, 9);
-      drawPixelBush(ctx, 24, 60, 11);
-
-      // Top-Right corner
-      drawPixelTree(ctx, 352, 32);
-      drawPixelBush(ctx, 326, 26, 9);
-      drawPixelBush(ctx, 360, 60, 11);
-
-      // Bottom-Left corner
-      drawPixelTree(ctx, 32, 352);
-      drawPixelBush(ctx, 58, 358, 9);
-      drawPixelBush(ctx, 24, 324, 11);
-
-      // Bottom-Right corner
-      drawPixelTree(ctx, 352, 352);
-      drawPixelBush(ctx, 326, 358, 9);
-      drawPixelBush(ctx, 360, 324, 11);
-      break;
-    }
-
-    case 'CUEVA_UMBRIA': {
-      // Top-Left corner
-      drawStalagmite(ctx, 16, 44, 26, 10);
-      drawStalagmite(ctx, 44, 16, 22, 9);
-      drawCrystalCluster(ctx, 30, 32);
-
-      // Top-Right corner
-      drawStalagmite(ctx, 368, 44, 26, 10);
-      drawStalagmite(ctx, 340, 16, 22, 9);
-      drawCrystalCluster(ctx, 354, 32);
-
-      // Bottom-Left corner
-      drawStalagmite(ctx, 16, 340, 26, 10);
-      drawStalagmite(ctx, 44, 368, 22, 9);
-      drawCrystalCluster(ctx, 30, 352);
-
-      // Bottom-Right corner
-      drawStalagmite(ctx, 368, 340, 26, 10);
-      drawStalagmite(ctx, 340, 368, 22, 9);
-      drawCrystalCluster(ctx, 354, 352);
-      break;
-    }
-
-    case 'MONTE_IGNEO': {
-      // Top-Left corner
-      drawLavaPool(ctx, 30, 30, 24, 18);
-      drawLavaRock(ctx, 58, 22, 16, 12);
-      drawLavaRock(ctx, 22, 58, 14, 12);
-
-      // Top-Right corner
-      drawLavaPool(ctx, 354, 30, 24, 18);
-      drawLavaRock(ctx, 326, 22, 16, 12);
-      drawLavaRock(ctx, 362, 58, 14, 12);
-
-      // Bottom-Left corner
-      drawLavaPool(ctx, 30, 354, 24, 18);
-      drawLavaRock(ctx, 58, 362, 16, 12);
-      drawLavaRock(ctx, 22, 326, 14, 12);
-
-      // Bottom-Right corner
-      drawLavaPool(ctx, 354, 354, 24, 18);
-      drawLavaRock(ctx, 326, 362, 16, 12);
-      drawLavaRock(ctx, 362, 326, 14, 12);
-      break;
-    }
-
-    case 'COSTA_RUINAS': {
-      // Top-Left corner: Broken marble column
-      drawBrokenColumn(ctx, 32, 40);
-      drawBrokenColumn(ctx, 56, 22);
-
-      // Top-Right corner: Palm tree
-      drawPalmTree(ctx, 352, 44, false);
-      drawBrokenColumn(ctx, 330, 36);
-
-      // Bottom-Left corner: Palm tree
-      drawPalmTree(ctx, 32, 340, true);
-      drawBrokenColumn(ctx, 56, 356);
-
-      // Bottom-Right corner: Broken marble column
-      drawBrokenColumn(ctx, 352, 344);
-      drawBrokenColumn(ctx, 328, 362);
-      break;
+  const [tplA, tplB] = cornerTemplates(biome.id);
+  const placed: Array<{ sprite: PixelBuffer; x: number; y: number; flip: boolean; foot: number }> = [];
+  for (let corner = 0; corner < 4; corner++) {
+    const left = corner % 2 === 0;
+    const top = corner < 2;
+    // TL(0)=A, TR(1)=B, BL(2)=B, BR(3)=A
+    const tpl = corner === 0 || corner === 3 ? tplA : tplB;
+    for (const { sprite, dx, dy } of tpl) {
+      const cx = left ? dx : SIZE - dx;
+      const cy = top ? dy : SIZE - dy;
+      // Se mantiene el sprite completo dentro del lienzo.
+      const x = Math.max(0, Math.min(SIZE - sprite.w, Math.round(cx - sprite.w / 2)));
+      const y = Math.max(0, Math.min(SIZE - sprite.h, Math.round(cy - sprite.h / 2)));
+      placed.push({ sprite, x, y, flip: !left, foot: y + sprite.h });
     }
   }
+  // Orden por profundidad: lo más abajo se pinta al final.
+  placed.sort((p, q) => p.foot - q.foot);
+  for (const p of placed) blit(ctx, p.sprite, p.x, p.y, p.flip);
 }
 
 // ---------------------------------------------------------------------------
-// Layer 4: Central Bastion Platform (radius 48)
+// Layer 4: plataforma central del Bastión (emblema de Poké Ball)
 // ---------------------------------------------------------------------------
 
+export function buildPlatformSprite(radius = 48): PixelBuffer {
+  const d = radius * 2 + 2;
+  const b = new PixelBuffer(d, d);
+  const c = d / 2;
+  const R = radius;
+  for (let y = 0; y < d; y++) {
+    for (let x = 0; x < d; x++) {
+      const dx = x + 0.5 - c;
+      const dy = y + 0.5 - c;
+      const r = Math.hypot(dx, dy);
+      if (r > R) continue;
+      const ang = Math.atan2(dy, dx);
+      // Anillo exterior discontinuo (14 tramos).
+      if (r > R - 2.2) {
+        const seg = Math.floor(((ang + Math.PI) / (Math.PI * 2)) * 28) % 2 === 0;
+        b.set(x, y, seg ? 'rgba(255,255,255,0.62)' : 'rgba(255,255,255,0.14)');
+        continue;
+      }
+      // Banda central de la Poké Ball.
+      if (Math.abs(dy) < 3 && r > 15) { b.set(x, y, 'rgba(32,32,40,0.30)'); continue; }
+      // Botón central.
+      if (r < 15) {
+        if (r > 12) b.set(x, y, 'rgba(32,32,40,0.30)');
+        else if (r > 8.5) b.set(x, y, 'rgba(255,255,255,0.20)');
+        else b.set(x, y, 'rgba(255,255,255,0.10)');
+        continue;
+      }
+      // Mitades: arriba casi transparente, abajo más clara (sutil para no estorbar a los sprites).
+      b.set(x, y, dy < 0 ? 'rgba(255,255,255,0.07)' : 'rgba(255,255,255,0.20)');
+    }
+  }
+  return b;
+}
+
 function drawBastionPlatform(ctx: CanvasRenderingContext2D): void {
-  const r = 48; // Radius ~48 px
-
-  // Platform fill with subtle contrast
-  ctx.fillStyle = 'rgba(255, 255, 255, 0.22)';
-  ctx.beginPath();
-  ctx.arc(CENTER, CENTER, r, 0, FULL_CIRCLE);
-  ctx.fill();
-
-  // Subtle inner accent rim
-  ctx.fillStyle = 'rgba(255, 255, 255, 0.08)';
-  ctx.beginPath();
-  ctx.arc(CENTER, CENTER, r - 4, 0, FULL_CIRCLE);
-  ctx.fill();
-
-  // Dashed border
-  ctx.setLineDash([6, 6]);
-  ctx.lineWidth = 2;
-  ctx.strokeStyle = 'rgba(255, 255, 255, 0.7)';
-  ctx.stroke();
-  ctx.setLineDash([]);
+  const sprite = buildPlatformSprite(48);
+  blit(ctx, sprite, Math.round(CENTER - sprite.w / 2), Math.round(CENTER - sprite.h / 2));
 }
 
 // ---------------------------------------------------------------------------
@@ -517,7 +269,7 @@ function drawBastionPlatform(ctx: CanvasRenderingContext2D): void {
 // ---------------------------------------------------------------------------
 
 /**
- * Builds and pre-renders a 384×384 canvas backdrop for the given biome (Block 3A.4).
+ * Builds and pre-renders a 384×384 canvas backdrop for the given biome.
  * Rendered once per biome transition; drawn via a single `drawImage` per frame.
  */
 export function buildBackdrop(biome: BiomeDefinition): HTMLCanvasElement {
@@ -526,30 +278,18 @@ export function buildBackdrop(biome: BiomeDefinition): HTMLCanvasElement {
   }
 
   const canvas = document.createElement('canvas');
-  canvas.width = ARENA.SIZE;
-  canvas.height = ARENA.SIZE;
+  canvas.width = SIZE;
+  canvas.height = SIZE;
 
   const ctx = canvas.getContext('2d');
   if (!ctx) return canvas;
 
   ctx.imageSmoothingEnabled = false;
 
-  // Layer 1: 32px tiled checkerboard ground
-  for (let ty = 0; ty < TILES_PER_ROW; ty++) {
-    for (let tx = 0; tx < TILES_PER_ROW; tx++) {
-      ctx.fillStyle = (tx + ty) % 2 === 0 ? biome.palette.groundA : biome.palette.groundB;
-      ctx.fillRect(tx * TILE, ty * TILE, TILE, TILE);
-    }
-  }
-
-  // Layer 2: Deterministic micro-decorations
-  drawMicroDecorations(ctx, biome);
-
-  // Layer 3: Corner macro-decorations (outside radius 192)
-  drawCornerDecorations(ctx, biome);
-
-  // Layer 4: Central Bastion platform (radius ~48 circle with dashed border)
-  drawBastionPlatform(ctx);
+  paintGround(ctx, biome); // Layer 1 (continuo, sin cuadros)
+  drawMicroDecorations(ctx, biome); // Layer 2
+  drawCornerDecorations(ctx, biome); // Layer 3
+  drawBastionPlatform(ctx); // Layer 4
 
   return canvas;
 }

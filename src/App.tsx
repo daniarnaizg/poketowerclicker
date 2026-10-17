@@ -6,6 +6,7 @@
 
 import { useEffect, useRef } from 'preact/hooks';
 import { ArenaRenderer } from './renderer/arena';
+import { audio } from './audio';
 import './renderer/arena.css';
 import { useGameStore, useGameState } from './ui/store';
 import { useMetaStore } from './ui/metaStore';
@@ -115,6 +116,9 @@ export default function App() {
   const metaLoaded = useMetaStore((s) => s.loaded);
   const rewards = useMetaStore((s) => s.rewards);
 
+  // Audio: desbloqueo por primer gesto, tecla M, sonidos de botones y pausa en segundo plano.
+  useEffect(() => audio.install(), []);
+
   // Load the persisted meta (collection, seals, loadout) once.
   useEffect(() => {
     void useMetaStore.getState().init();
@@ -182,6 +186,7 @@ export default function App() {
       canvas.setPointerCapture(e.pointerId);
       if (stateRef.current.phase === 'PLAYING') {
         store.requestClickAttack(hold.x, hold.y, false);
+        audio.sfx('click');
       }
       if (e.pointerType === 'touch') {
         const autoclickLevel = stateRef.current.bastionUpgrades.UP_AUTOCLICK ?? 0;
@@ -266,6 +271,7 @@ export default function App() {
           if (now - hold.lastFire >= HOLD_FIRE_INTERVAL_MS) {
             hold.lastFire = now;
             store.requestClickAttack(hold.x, hold.y, false);
+            audio.sfx('click');
           }
         } else {
           const autoclickLevel = stateRef.current.bastionUpgrades.UP_AUTOCLICK ?? 0;
@@ -293,6 +299,7 @@ export default function App() {
       const input = store.consumeInput();
       const delta = steps > 0 ? steps * STEP_MS + 0.001 : 0;
       const next = tickGame(stateRef.current, input, GAME_CONFIG, delta, rngRef.current);
+      audio.observe(stateRef.current, next); // música por bioma/jefe + SFX por cambios de estado
       stateRef.current = next;
       store.setGameState(next); // throttled to ~10 Hz, always on phase change
       renderer.render(next);
