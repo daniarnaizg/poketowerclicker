@@ -16,6 +16,7 @@ import type {
   BastionUpgrades,
   Cooldowns6,
   Enemy,
+  EnemyStrike,
   FloatingText,
   GameConfig,
   GameInput,
@@ -84,6 +85,8 @@ const MAX_STEPS_PER_TICK = 5;
 
 /** Floating-text lifetime in seconds. */
 const FLOATING_TEXT_MAX_AGE = 1.0;
+/** How long an enemy strike record lives (covers the longest Attack animation). */
+const ENEMY_STRIKE_MAX_AGE = 0.7;
 /** Visual-effect lifetime in seconds, by kind. */
 const EFFECT_MAX_AGE: Record<VisualEffect['kind'], number> = {
   BEAM: 0.35,
@@ -155,6 +158,7 @@ function maxEntityId(state: GameState): number {
   for (const p of state.projectiles) if (p.id > max) max = p.id;
   for (const f of state.floatingTexts) if (f.id > max) max = f.id;
   for (const fx of state.effects ?? []) if (fx.id > max) max = fx.id;
+  for (const st of state.strikes ?? []) if (st.id > max) max = st.id;
   for (const slot of state.team) if (slot.pokemon && slot.pokemon.id > max) max = slot.pokemon.id;
   return max;
 }
@@ -869,9 +873,27 @@ function stepOnce(state: GameState, config: GameConfig, rng: () => number): Game
   const effects: VisualEffect[] = (state.effects ?? [])
     .map((fx) => ({ ...fx, age: fx.age + dt }))
     .filter((fx) => fx.age < fx.maxAge);
+  const strikes: EnemyStrike[] = (state.strikes ?? [])
+    .map((st) => ({ ...st, age: st.age + dt }))
+    .filter((st) => st.age < st.maxAge);
   let nextTextId = maxEntityId(state) + 1;
   let lastKillerType: PokemonType | undefined;
   let leaksThisWave = 0;
+
+  /** Records a cosmetic attack so the renderer can play the Attack animation. */
+  const recordStrike = (enemy: Enemy): void => {
+    strikes.push({
+      id: nextTextId++,
+      enemyId: enemy.id,
+      x: enemy.x,
+      y: enemy.y,
+      definitionId: enemy.definitionId,
+      types: enemy.types,
+      isBoss: enemy.isBoss,
+      age: 0,
+      maxAge: ENEMY_STRIKE_MAX_AGE,
+    });
+  };
 
   let bastionShieldSec = state.bastionShieldSec ?? 0;
   let phase: GamePhase = state.phase;
@@ -1044,6 +1066,7 @@ function stepOnce(state: GameState, config: GameConfig, rng: () => number): Game
         }
         const cd = (enemy.bossAttackCooldownSec !== undefined ? enemy.bossAttackCooldownSec : 0) - dt;
         if (cd <= 0) {
+          recordStrike(enemy);
           const currentActive = team.find((s) => s.isActive && s.pokemon?.alive)?.pokemon;
           if (currentActive) {
             applyDamageToActive(currentActive.maxHp * BOSS_ANCHOR_MAX_HP_FRACTION, enemy.types, 'boss');
@@ -1053,6 +1076,7 @@ function stepOnce(state: GameState, config: GameConfig, rng: () => number): Game
           enemy.bossAttackCooldownSec = cd;
         }
       } else {
+        recordStrike(enemy);
         applyDamageToActive(leakDamageForFloor(floor), enemy.types, 'leak');
         leaksThisWave += 1;
         enemy.alive = false;
@@ -1199,6 +1223,7 @@ function stepOnce(state: GameState, config: GameConfig, rng: () => number): Game
       projectiles: liveProjectiles,
       floatingTexts,
       effects,
+      strikes,
       bastionShieldSec: nextShield,
       gold,
       bossTimerSec,
@@ -1252,6 +1277,7 @@ function stepOnce(state: GameState, config: GameConfig, rng: () => number): Game
     projectiles: liveProjectiles,
     floatingTexts,
     effects,
+    strikes,
     bastionShieldSec: nextShield,
     gold,
     bossTimerSec,

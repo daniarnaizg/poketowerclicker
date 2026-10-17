@@ -64,3 +64,33 @@ describe('sprites decorativos', () => {
     }
   });
 });
+
+describe('toRgba', () => {
+  it('convierte hex y rgba() a RGBA 0..255', async () => {
+    const { toRgba } = await import('./pixelArt');
+    expect(toRgba('#ff8000')).toEqual([255, 128, 0, 255]);
+    expect(toRgba('rgba(0,0,0,0.5)')).toEqual([0, 0, 0, 128]);
+  });
+});
+
+describe('sprites decorativos: PNG editable con fallback procedural', () => {
+  it('sin DOM (o sin PNG) getDecorSprite cae al builder y dibuja con fillRect', async () => {
+    const { getDecorSprite, decorReady } = await import('./decorSprites');
+    expect(decorReady()).toBe(true);
+    const sprite = getDecorSprite('ruta_verde/tree_a');
+    expect(sprite.w).toBe(38);
+    expect(sprite.h).toBe(48);
+    const ctx = { fillStyle: '', fillRect: vi.fn() } as unknown as CanvasRenderingContext2D;
+    sprite.draw(ctx, 10, 10);
+    expect(ctx.fillRect).toHaveBeenCalled();
+  });
+
+  it('todos los nombres del catálogo producen un sprite no vacío', async () => {
+    const { DECOR_CATALOG } = await import('./decorCatalog');
+    for (const [name, build] of Object.entries(DECOR_CATALOG)) {
+      const b = (build as () => PixelBuffer)();
+      expect(b.count() > 5).toBe(true);
+      expect(name.includes('/')).toBe(true);
+    }
+  });
+});

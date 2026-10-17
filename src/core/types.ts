@@ -340,6 +340,29 @@ export interface GameState {
   bastionShieldSec?: number;
   /** Short-lived visual cues (ultimates, switch-in rings) consumed by the renderer. */
   effects?: VisualEffect[];
+  /** Short-lived attack records (enemies hitting the bastion) consumed by the renderer. */
+  strikes?: EnemyStrike[];
+}
+
+/**
+ * Purely cosmetic "hit" record: an enemy reached the bastion and attacked.
+ * Normal enemies die in the same tick (gameplay is unchanged), so this lets the
+ * renderer keep playing their Attack animation for a moment; bosses create one per
+ * periodic strike. The core ages and expires it like floating text.
+ */
+export interface EnemyStrike {
+  id: number;
+  /** Id of the enemy that struck (the boss stays alive; normal enemies are already dead). */
+  enemyId: number;
+  /** Where the attacker stood when it struck (arena logical px). */
+  x: number;
+  y: number;
+  /** Sprite lookup data (the enemy itself may no longer be in `enemies`). */
+  definitionId: string;
+  types: [PokemonType] | [PokemonType, PokemonType];
+  isBoss: boolean;
+  age: number;
+  maxAge: number;
 }
 
 /** Purely cosmetic effect; the core ages and expires it like floating text. */
