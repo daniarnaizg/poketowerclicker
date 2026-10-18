@@ -12,6 +12,7 @@ import {
   createMeta,
   pullGacha,
   setLoadoutSlot,
+  setTeam as setTeamMeta,
   settleRun as settleRunMeta,
 } from '../core/meta';
 import type { MetaState, PullOutcome, RunRewards } from '../core/meta';
@@ -32,6 +33,8 @@ interface MetaStore {
   pull: (count: number) => void;
   awaken: (id: string) => void;
   setSlot: (slot: number, id: string | null) => void;
+  /** Replace the whole team; ids[0] is the main Pokémon, the rest order is irrelevant. */
+  setTeam: (ids: (string | null)[]) => void;
   /** Pay out a finished run exactly once (guarded until `beginRun`). */
   settleFinishedRun: (runStats: RunStats) => void;
   /** Re-arm the settle guard when a new run starts. */
@@ -78,6 +81,11 @@ export const useMetaStore = create<MetaStore>((set, get) => {
 
     setSlot: (slot, id) => {
       const next = setLoadoutSlot(get().meta, slot, id);
+      if (next !== get().meta) commit(next);
+    },
+
+    setTeam: (ids) => {
+      const next = setTeamMeta(get().meta, ids);
       if (next !== get().meta) commit(next);
     },
 

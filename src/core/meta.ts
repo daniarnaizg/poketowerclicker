@@ -215,6 +215,38 @@ export function setLoadoutSlot(meta: MetaState, slot: number, speciesId: string 
   return { ...meta, loadout };
 }
 
+/**
+ * Species already on `team` that shares an evolutionary line with `speciesId`
+ * (handoff §2.6: one Pokémon per line), or null when there is no clash.
+ */
+export function findLineConflict(team: readonly (string | null)[], speciesId: string): string | null {
+  const chain = getEvolutionChain(speciesId);
+  for (const other of team) {
+    if (!other || other === speciesId) continue;
+    if (chain.includes(other) || getEvolutionChain(other).includes(speciesId)) return other;
+  }
+  return null;
+}
+
+/**
+ * Replace the whole team in one step. `ids[0]` is the MAIN Pokémon (the one
+ * that starts the run active); the order of the rest is irrelevant. Unowned,
+ * duplicated and same-line species are dropped, extras beyond TEAM_SIZE are
+ * ignored and the result is packed to the front so the main slot is never
+ * empty while the team is not.
+ */
+export function setTeam(meta: MetaState, ids: readonly (string | null)[]): MetaState {
+  const team: string[] = [];
+  for (const id of ids) {
+    if (!id || team.length >= TEAM_SIZE) continue;
+    if (!meta.collection[id] || team.includes(id) || findLineConflict(team, id)) continue;
+    team.push(id);
+  }
+  const loadout: (string | null)[] = Array.from({ length: TEAM_SIZE }, (_, i) => team[i] ?? null);
+  if (loadout.every((id, i) => id === meta.loadout[i])) return meta;
+  return { ...meta, loadout };
+}
+
 export function loadoutSize(meta: MetaState): number {
   return meta.loadout.filter((id) => id !== null).length;
 }
