@@ -164,6 +164,10 @@ function maxEntityId(state: GameState): number {
   return max;
 }
 
+function resolveNextEntityId(state: GameState): number {
+  return state.nextEntityId ?? maxEntityId(state) + 1;
+}
+
 function attackerOf(active: PlayerPokemon | null, types: readonly PokemonType[]): DamageAttacker {
   return {
     atk: active?.atk ?? 50,
@@ -332,6 +336,7 @@ function fireProjectiles(
   enemies: Enemy[],
   rng: () => number,
   bonuses: TeamBonuses,
+  allocId?: () => number,
 ): Projectile[] {
   const living = enemies.filter((e) => e.alive);
   if (living.length === 0) return [];
@@ -351,14 +356,15 @@ function fireProjectiles(
   const chainBounces =
     multi - 1 + (starsOf(active) >= STAR_PATTERN ? CHAIN_EXTRA_BOUNCES_AT_MAX_PATTERN : 0);
 
-  let id = maxEntityId(state) + 1;
+  let fallbackId = allocId ? 0 : resolveNextEntityId(state);
+  const nextId = allocId ?? (() => fallbackId++);
   const fired: Projectile[] = [];
   for (let s = 0; s < shots; s++) {
     if (active.pattern === AttackPattern.CHAIN) {
-      fired.push(createProjectile(id++, active, targets[0], speed, chainBounces));
+      fired.push(createProjectile(nextId(), active, targets[0], speed, chainBounces));
     } else {
       const count = Math.min(multi, targets.length);
-      for (let t = 0; t < count; t++) fired.push(createProjectile(id++, active, targets[t], speed, 0));
+      for (let t = 0; t < count; t++) fired.push(createProjectile(nextId(), active, targets[t], speed, 0));
     }
   }
   return fired;
@@ -567,6 +573,16 @@ function startRun(
   const waveRng = config.seed !== undefined ? rngFor(config.seed, 'WAVE', 1) : rng;
   const wave = generateWave(1, waveRng);
 
+  const initialNextId =
+    maxEntityId({
+      team,
+      enemies: wave,
+      projectiles: [],
+      floatingTexts: [],
+      effects: [],
+      strikes: [],
+    } as unknown as GameState) + 1;
+
   return {
     ...state,
     phase: 'PLAYING',
@@ -587,6 +603,7 @@ function startRun(
     autoAdvanceWave: undefined,
     bastionShieldSec: 0,
     effects: [],
+    nextEntityId: initialNextId,
     runStats: {
       totalKills: 0,
       totalGoldEarned: 0,
@@ -639,7 +656,7 @@ function applyHotSwap(
   const floatingTexts = [...next.floatingTexts];
   const effects = [...(next.effects ?? [])];
   const defeatedBossFloors = next.runStats.defeatedBossFloors ? [...next.runStats.defeatedBossFloors] : [];
-  let nextTextId = maxEntityId(next) + 1;
+  let nextTextId = resolveNextEntityId(next);
 
   const burst = applySwitchInBurst(
     incoming,
@@ -667,6 +684,7 @@ function applyHotSwap(
     floatingTexts,
     effects,
     bastionShieldSec: burst.shield,
+    nextEntityId: burst.nextTextId,
     runStats: {
       ...next.runStats,
       totalKills: next.runStats.totalKills + burst.killsDelta,
@@ -687,14 +705,15 @@ function applyClick(
   const active = getActive(state);
   if (!active) return state;
 
+  let nextId = resolveNextEntityId(state);
   const speed = PROJECTILE_SPEED[active.pattern];
   const bounce =
     active.pattern === AttackPattern.CHAIN && starsOf(active) >= STAR_PATTERN
       ? CHAIN_EXTRA_BOUNCES_AT_MAX_PATTERN
       : 0;
-  const p = createProjectileAtPoint(maxEntityId(state) + 1, active, click.x, click.y, speed, bounce);
+  const p = createProjectileAtPoint(nextId++, active, click.x, click.y, speed, bounce);
 
-  const fx = createEffect(p.id + 1, 'RING', active.types[0], click.x, click.y, {
+  const fx = createEffect(nextId++, 'RING', active.types[0], click.x, click.y, {
     radius: 14,
     maxAge: 0.22,
   });
@@ -706,6 +725,7 @@ function applyClick(
     ...state,
     projectiles: [...state.projectiles, p],
     effects: [...(state.effects ?? []), fx],
+    nextEntityId: nextId,
     runStats: {
       ...state.runStats,
       manualClicks,
@@ -733,7 +753,7 @@ function applyUltimate(state: GameState, config: GameConfig, rng: () => number):
   const damagePerSlot = [...state.runStats.damagePerSlot];
   const floatingTexts = [...state.floatingTexts];
   const effects = [...(state.effects ?? [])];
-  let nextTextId = maxEntityId(state) + 1;
+  let nextTextId = resolveNextEntityId(state);
   let gold = state.gold;
   let totalKills = state.runStats.totalKills;
   let totalGold = state.runStats.totalGoldEarned;
@@ -802,6 +822,7 @@ function applyUltimate(state: GameState, config: GameConfig, rng: () => number):
     floatingTexts,
     effects,
     ultimateCharge: 0,
+    nextEntityId: nextTextId,
     runStats: {
       ...state.runStats,
       totalKills,
@@ -877,7 +898,7 @@ function stepOnce(state: GameState, config: GameConfig, rng: () => number): Game
   const strikes: EnemyStrike[] = (state.strikes ?? [])
     .map((st) => ({ ...st, age: st.age + dt }))
     .filter((st) => st.age < st.maxAge);
-  let nextTextId = maxEntityId(state) + 1;
+  let nextTextId = resolveNextEntityId(state);
   let lastKillerType: PokemonType | undefined;
   let leaksThisWave = 0;
 
@@ -1124,7 +1145,9 @@ function stepOnce(state: GameState, config: GameConfig, rng: () => number): Game
 
   // 2. Auto-fire.
   if (currentActive) {
-    for (const p of fireProjectiles(state, currentActive, enemies, rng, bonuses)) projectiles.push(p);
+    for (const p of fireProjectiles(state, currentActive, enemies, rng, bonuses, () => nextTextId++)) {
+      projectiles.push(p);
+    }
   }
 
   // 3. Projectiles move, then resolve hits (damage, kills, splash, pierce/bounce).
@@ -1235,6 +1258,7 @@ function stepOnce(state: GameState, config: GameConfig, rng: () => number): Game
       awaitingNextWave,
       hotSwapCooldowns,
       team,
+      nextEntityId: nextTextId,
       runStats: {
         ...runStats,
         mvpSlotIndex: mvpSlotOf(damagePerSlot),
@@ -1262,7 +1286,7 @@ function stepOnce(state: GameState, config: GameConfig, rng: () => number): Game
       interWaveTimerSec = undefined;
       floor += 1;
       const waveRng = config.seed !== undefined ? rngFor(config.seed, 'WAVE', floor) : rng;
-      const wave = generateWave(floor, waveRng);
+      const wave = generateWave(floor, waveRng).map((e) => ({ ...e, id: nextTextId++ }));
       finalEnemies = wave;
       waveEnemiesRemaining = wave.length;
       bossTimerSec = wave.some((e) => e.isBoss)
@@ -1289,6 +1313,7 @@ function stepOnce(state: GameState, config: GameConfig, rng: () => number): Game
     awaitingNextWave,
     hotSwapCooldowns,
     team,
+    nextEntityId: nextTextId,
     runStats,
   };
 }
@@ -1324,6 +1349,10 @@ export function tickGame(
 ): GameState {
   let next = applyInput(state, input, config, rng);
   if (next.phase !== 'PLAYING') return next;
+
+  if (next.nextEntityId === undefined) {
+    next = { ...next, nextEntityId: resolveNextEntityId(next) };
+  }
 
   const steps = Math.min(Math.floor(deltaMs / FIXED_STEP_MS), MAX_STEPS_PER_TICK);
   for (let i = 0; i < steps && next.phase === 'PLAYING'; i++) {
