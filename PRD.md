@@ -1151,14 +1151,14 @@ Auditoría hecha leyendo el código y ejecutando el núcleo real con `docs/analy
 | A3 | **La curva de HP no cierra con la del jugador** (`×1,18/piso` vs lineal). | Ajustada a `×1,085/piso` en `89abb76`. | `3A.2-S` |
 | A4 | **RNG único y semilla fija = 1**. | **Resuelto en `89abb76`** (`src/core/rng.ts`: canales `WAVE`, `SPECIAL`, `COMBAT`). | — |
 | A5 | **Los enemigos no tienen especie** (`'WILD'`/`'BOSS'`). | **Resuelto en `89abb76`** (`src/data/enemies.ts`, `src/data/biomes.ts`). | — |
-| A6 | **La oleada exige `aliveEnemies.length === 0`**. | Vigente. | Fase 3C (§9.6 req. 1) |
+| A6 | **La oleada exige `aliveEnemies.length === 0`**. | **Actualizado en v2.6 por D20–D28 (ver Anexo A.4)** (fin de piso = cola vacía y vivos no-fugitivo = 0). | — |
 | A7 | **Inmunidades dejan el daño en 0** (52% del roster afectado). | **Resuelto en `89abb76`** (`IMMUNITY_FLOOR = 0.25` en `getEffectiveness`). | — |
 | A8 | **Sprites por *hotlink*** a `raw.githubusercontent.com`. | **Resuelto en `89abb76`** (`scripts/sync-pokemon.ts` → `public/sprites/` + `CREDITS.md`). | Añadir Chansey `0113` / Kecleon `0352` en `3A.2-P` |
 | A9 | `howler` e `idb-keyval` sin uso. | `idb-keyval` resuelto en Fase 2; queda `howler`. | Fase 3C (audio) |
 | A10 | Clic solo con `mousedown`. | **Resuelto en `89abb76`** (`pointerdown` + `pointermove` + `UP_AUTOCLICK`). | — |
 | A11 | **Deriva PRD ↔ código** (arena 384 px, mejoras, etc.). | Reconciliado en v2.5 (ver A.3). | — |
 | A12 | Pools de jefes incluyen Gen 2/3. | **Resuelto en `89abb76`** (`biomes.ts`). | — |
-| A13 | `ARENA.SPAWN_MARGIN` no se usa. | Vigente (no bloqueante). | — |
+| A13 | `ARENA.SPAWN_MARGIN` no se usa. | **Actualizado en v2.6 por D20–D28 (ver Anexo A.4)** (nacimiento en radio 208 fuera de la arena visible). | — |
 
 ### A.2. Auditoría Post-Fase 2 y Análisis del Simulador (commit `d800ce9`, 16-oct-2026)
 
@@ -1178,9 +1178,41 @@ Auditoría hecha leyendo el código y ejecutando el núcleo real con `docs/analy
 3. **Reconciliación PRD ↔ Código (`HEAD 89abb76`):**
    * En `89abb76`, `UP_CLICK` ya fue absorbida por `UP_ARROW` (*Proyectiles*, +10%/nv tanto para clic/autoclick como para auto-disparo), `AUTO_SPD_BASE_MULT = 0.5` (+12%/nv con `UP_SPD`), `MULTI_MAX_LEVEL = 4` (tope 5 disparos), y ya existen `rng.ts`, `enemies.ts`, `biomes.ts`, `backdrop.ts` y `sync-pokemon.ts`. Con la eliminación en v2.5 de `UP_HP` y `UP_WALL`, el panel queda en **7 mejoras con oro**.
 
+### A.4. Auditoría de Ritmo, Spawner y Jefes por Fases (Incoherencias B1–B12 detectadas en v2.5 y resueltas en v2.6, Anexo A.4)
+
+Auditoría técnica y empírica realizada sobre la rama `develop` (`HEAD` de v2.5) ejecutando `pnpm test`, `pnpm run test:balance` y el nuevo benchmark determinista `scripts/bench-core.ts` (registrado en `docs/SPEC_SPAWNER_BOSSES.md`).
+
+| # | Hallazgo verificado en v2.5 | Dónde / Evidencia | Resolución en v2.6 |
+| :--- | :--- | :--- | :--- |
+| **B1** | **Spawn en bloque sincronizado:** la oleada se genera de golpe (10 enemigos simultáneos en el anillo de radio 192 a velocidad idéntica, llegando todos juntos al centro en ~6 s). | `waveGenerator.ts` (`generateWave`), `balance.config.ts` (`WAVE_ENEMY_COUNT_BASE`) | **Resuelto por D20 y D21 (WP2, WP3):** sustituido por un flujo continuo determinista $N(f)$ distribuido en ventana $S(f)$ mediante `buildFloorPlan`, con tope de vivos `ALIVE_CAP = 70` y retención en cola. |
+| **B2** | **Curva de HP de enemigos trivial frente a proyectiles:** $\text{HP}(f) = 10 \cdot 1,085^{f-1}$ (10 HP en piso 1, 20 en piso 10, 47 en piso 20) vs `PROJECTILE_BASE_DAMAGE = 60`. Cada enemigo muere de 1 solo impacto hasta ~piso 20. | `balance.config.ts` | **Resuelto por WP4:** recalibración de HP base y escalado de enemigos para exigir 2–3 impactos en el piso 1 y acompasar la curva de daño al flujo continuo. |
+| **B3** | **Jefes mueren de un solo golpe (one-shot de Definitiva):** HP de jefe = $\text{enemyHp} \times 10$ (piso 10 ≈ 200 HP). Las Definitivas infligen $60 \times \text{power}$ (600–1.200 daño base). Un jefe de piso 10 muere de 1 definitiva con margen $\times 3\text{--}6$. | `waveGenerator.ts`, `data/ultimates.ts` | **Resuelto por D25 y D26 (WP5):** HP de jefe dimensionado por tiempo objetivo de muerte (TTK, `BOSS_POOL_FACTOR`); sistema universal de 3 fases (66% y 33%) con recorte estricto de daño sobrante en umbrales e invulnerabilidad temporal (ninguna definitiva salta fases). |
+| **B4** | **Jefe inofensivo que no llega a golpear:** tarda ~6,7 s en alcanzar el centro a 25 px/s y muere antes; su golpe anclado fijo del 6% maxHp/1 s no genera peligro real. | `gameLoop.ts` (L1061–1078) | **Resuelto por D27 y D28 (WP5):** anclaje acelerado y endurecido por fase (5%/1,0s en F1, 7%/0,85s en F2, 9%/0,7s en F3); invocación de adds por el spawner; `BOSS_TIMER_MODE: 'enrage'` que acumula +50% daño/10 s al expirar el reloj. |
+| **B5** | **Simulador con ritmo plano y desbalance idle:** bot 1,5 clics/s alcanza piso 64 en 389 s con 0 fugas (91 bajas exactas por década); bot 4 clics/s llega a piso 80 en 446 s; bot 0 clics (idle puro con starter) muere en piso 2–3. | `scripts/sim-balance.ts` | **Resuelto por D22, D24 y WP7:** calibración con arco de dificultad en 4 zonas (A–D); fugas calculadas como fracción de horda (`LEAK_KILL_FRACTION = 0.30`); diferenciación clara donde 4 clics/s rinde $\ge +15\%$ pisos en zona C. |
+| **B6** | **Coste del step determinista medido:** `tickGame` con $N$ enemigos casi inmóviles tarda ~0,08 ms con 10, ~0,2 ms con 100, ~0,4 ms con 200 y <1 ms con 400 enemigos en Node 22 (cota inferior pura sin renderer/UI). | `scripts/bench-core.ts` | **Verificado por WP6:** confirma viabilidad holgada del core determinista para hordas de 70 vivos dentro del presupuesto de frame de 16,6 ms. |
+| **B7** | **Límite geométrico visual en arena:** sprites de $r \times 4 = 48\text{ px}$ en arena lógica de 384 px admiten ~50 entidades sin solapamiento y 60–80 legibles. | `renderer/arena.ts`, `arena.config.ts` | **Resuelto por D21:** fijación estricta de `ALIVE_CAP = 70` como invariante geométrico del render y del spawner. |
+| **B8** | **Patrones de coste innecesario por tick:** clonaciones `enemies.map(e => ({...e}))` cada step; `fireProjectiles` ordena todos los enemigos vivos; colisión $O(P \cdot E)$ con spread de arrays; `maxEntityId` recorre todas las entidades; textos flotantes por cada impacto individual. | `gameLoop.ts` | **Resuelto por WP6:** sustitución de `maxEntityId` por contador `nextEntityId` en `GameState`; reducción de reasignaciones y agrupación de textos de daño. |
+| **B9** | **Decremento manual frágil de enemigos restantes:** `waveEnemiesRemaining` se resta manualmente en $\ge 6$ puntos dispersos del bucle (quemadura, strike, fuga, definitiva, burst relevo…), incompatible con spawn progresivo. | `gameLoop.ts` | **Resuelto por D20 (WP3):** `waveEnemiesRemaining` reconvertido en valor derivado puro calculado al final del step: `(events.length - nextEventIdx) + vivos_no_jefe (+1 si jefe vivo)`. |
+| **B10** | **Sobrecarga de closures y capas en renderer:** generación de `DrawItem` con closure por enemigo y frame; doble filtrado y ordenación; barra de HP renderizada para absolutamente todos los enemigos en pantalla. | `renderer/arena.ts` (`enemyItems`, `render`) | **Resuelto por WP6:** renderizado optimizado en pase único sin closures por frame; barra de HP selectiva (jefe y enemigos dañados recientemente). |
+| **B11** | **`ARENA.SPAWN_MARGIN` sin uso efectivo:** enemigos nacen sobre el radio de arena 192 px apareciendo bruscamente dentro del marco visible en lugar de cruzar el perímetro exterior. | `arena.config.ts` (incoherencia A13 previa) | **Resuelto por D20 (WP2, WP3):** nacimiento configurado en radio exterior `ARENA.SPAWN_HALF_EXTENT = 208` px, integrando el margen para que los enemigos entren caminando. |
+| **B12** | **Fichero espurio `nul` en el repositorio:** presencia de un artefacto de redirección de Windows en la raíz del repo. | Raíz del proyecto (`nul`) | **Resuelto por WP0:** eliminación del archivo `nul` y adición de la exclusión expresa en `.gitignore`. |
+
 ---
 
 ## Anexo B. Historial de Cambios del PRD
+
+### De la v2.5 a la v2.6 (18-oct-2026 — v2.5 → v2.6)
+
+| Sección | Cambio |
+| :--- | :--- |
+| Cabecera, §1, §2 | **Visión y ritmo continuo:** sustitución de oleadas en bloque por flujo continuo $N(f)$ en ventana $S(f)$ (D20, D22). Duración objetivo de piso calibrada a ~60 s (pisos exigentes 75–95 s). Bloque `3A.5` integrado como prerrequisito de `3A.2-S`. |
+| §3.2, §5.1, §9.5 | **Jefes por fases y anti-one-shot (D25, D26, D27, D28):** HP por TTK objetivo (`BOSS_POOL_FACTOR`); 3 fases en umbrales 66% y 33% con recorte estricto de HP en `applyDamageToEnemy` e invulnerabilidad 1,5 s; escalado de anclaje, invocación de adds deterministas y `BOSS_TIMER_MODE: 'enrage'` acumulativo (+50% cada 10 s). |
+| §4.4.2, §4.4.4 | **Economía de piso y fugas (D23, D24):** $W(f)$ como invariante económico global (`oro por enemigo = W / N`); daño de fugas redefinido como fracción de horda (`LEAK_KILL_FRACTION = 0.30`). |
+| §6.3, §7.1, §7.2 | **Contratos y `RunProof`:** tipos `FloorPlan`, `FloorRuntime` y `SpawnEvent`; cota mínima de duración de run $\ge \sum S(f)$ y TTK mínimo de jefe en sanity checks anti-trampa. |
+| §8, §9.1.5 | **Reestructuración del Roadmap 3A y Simulador v3:** inserción del bloque `3A.5` (WP1–WP6) previo a `3A.2-S` (WP7); calibración por arco de 4 zonas (A–D); adición de criterios de aceptación 8–12 de la spec. |
+| §9.9, §9.10 | **Torre, Mutadores y Riesgos:** mutador *Horda* redefinido ($N \times 1,5$, $\text{HP} \times 0,7$ respetando `ALIVE_CAP = 70`, D21); Torre $f > 100$ con ventana reducida; nuevos riesgos de fatiga, densidad, economía y timer de jefe; formalización de decisiones **D20–D28**. |
+| Anexo A.1, Anexo A.4 | **Resolución de deuda técnica previa (A6, A13) y nueva auditoría (B1–B12):** resolución de A6 (fin de piso por cola) y A13 (`SPAWN_MARGIN` activo en radio 208); incorporación de la tabla completa de hallazgos B1–B12 de v2.5 resueltos en v2.6. |
+| **Resumen WP0–WP7** | **Paquetes de Trabajo de la especificación `SPEC_SPAWNER_BOSSES.md`:**<br>• **WP0 (Higiene):** eliminación de fichero espurio `nul` y adición a `.gitignore` (B12).<br>• **WP1 (Tipos/Config):** constantes en `balance.config.ts` y tipos de runtime en `types.ts`.<br>• **WP2 (`floorPlan.ts`):** generador puro determinista de planes de spawn y ángulos estratificados.<br>• **WP3 (Integración bucle):** cola de spawn con tope `ALIVE_CAP`, `waveEnemiesRemaining` derivado y spawn perimetral.<br>• **WP4 (Economía/Fugas):** conservación de $W(f)$, daño de fuga y reescalado de HP enemigo a 2–3 impactos.<br>• **WP5 (Jefes):** recorte de fases 66/33, invulnerabilidad 1,5 s, adds, escalado y `'enrage'`.<br>• **WP6 (Rendimiento):** eliminación de `maxEntityId`, optimización de bucle, renderer en un pase y HUD optimizado.<br>• **WP7 (Simulador v3 / Calibración):** redefinición de `3A.2-S`, bots de prueba y validación de criterios 1–10. |
 
 ### De la v2.4 a la v2.5 (17-oct-2026)
 
