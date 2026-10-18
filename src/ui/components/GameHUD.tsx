@@ -2,7 +2,7 @@
  * PokéBastion — HUD sobre la arena: piso, cronómetro de jefe, HP del Bastión y ULT.
  */
 
-import { BOSS_TIMER_DURATION, nextShopFloor } from '../../config/balance.config';
+import { bossTimerForFloor, nextShopFloor } from '../../config/balance.config';
 import type { GameState } from '../../core/types';
 import { POKEDEX as POKEMON_REGISTRY } from '../../data/pokemon';
 import { AudioToggle } from './AudioToggle';
@@ -56,6 +56,12 @@ export function GameHUD({ gameState, onUltimate, onToggleAutoAdvance, onStartNex
   const inBreak = !!gameState.awaitingNextWave || gameState.interWaveTimerSec !== undefined;
   const ultRemainingSec = Math.ceil(gameState.ultimateMax - gameState.ultimateCharge);
 
+  const boss = gameState.enemies.find((e) => e.alive && e.isBoss);
+  const bossHp = boss ? Math.max(0, Math.ceil(boss.hp)) : 0;
+  const bossMaxHp = boss ? Math.max(1, boss.maxHp) : 1;
+  const bossHpRatio = Math.max(0, Math.min(1, bossHp / bossMaxHp));
+  const bossHpColor = bossHpRatio > 0.5 ? '#48c048' : bossHpRatio >= 0.25 ? '#f8d030' : '#f04040';
+
   return (
     <div class="game-hud pk-window flex shrink-0 flex-col gap-2.5 p-3">
       <div class="flex items-center justify-between gap-2 text-[10px]">
@@ -69,7 +75,7 @@ export function GameHUD({ gameState, onUltimate, onToggleAutoAdvance, onStartNex
         <span class="pk-dark px-2 py-2">SALVAJES {gameState.waveEnemiesRemaining}</span>
         {gameState.bossTimerSec !== undefined && (
           <span class="pk-dark px-2 py-2 text-[#f85848]">
-            {formatClock(gameState.bossTimerSec)}/{BOSS_TIMER_DURATION}s
+            {formatClock(gameState.bossTimerSec)}/{bossTimerForFloor(gameState.floor)}s
           </span>
         )}
       </div>
@@ -98,6 +104,38 @@ export function GameHUD({ gameState, onUltimate, onToggleAutoAdvance, onStartNex
         </button>
         <AudioToggle />
       </div>
+
+      {boss && (
+        <div class="flex items-center gap-2 text-[9px]">
+          <span class="pk-chip shrink-0" style={{ background: '#7c3aed' }}>
+            FASE {boss.bossPhase ?? 1}/3
+          </span>
+          {(boss.bossInvulnSec ?? 0) > 0 && (
+            <span class="pk-chip shrink-0 font-bold" style={{ background: '#c084fc', color: '#1a1a1a' }}>
+              INVULN
+            </span>
+          )}
+          {boss.enraged && (
+            <span class="pk-chip shrink-0 font-bold text-white" style={{ background: '#f04040' }}>
+              ¡ENFURECIDO!
+            </span>
+          )}
+          <span class="pk-bar relative flex-1">
+            <span style={{ width: `${bossHpRatio * 100}%`, background: bossHpColor }} />
+            <span
+              class="absolute top-0 bottom-0 w-[2px] bg-[#303030] pointer-events-none z-10"
+              style={{ left: '33%' }}
+            />
+            <span
+              class="absolute top-0 bottom-0 w-[2px] bg-[#303030] pointer-events-none z-10"
+              style={{ left: '66%' }}
+            />
+          </span>
+          <span class="pk-num">
+            {bossHp}/{bossMaxHp}
+          </span>
+        </div>
+      )}
 
       <div class="flex items-center gap-2 text-[9px]">
         <span class="w-14 shrink-0 truncate">{activeDef ? activeDef.name.toUpperCase() : 'ACTIVO'}</span>
