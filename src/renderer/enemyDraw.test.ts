@@ -28,3 +28,30 @@ describe('enemyDrawPos', () => {
     expect(enemyDrawPos(boss)).toEqual({ x: boss.x, y: boss.y });
   });
 });
+
+describe('shouldRenderEnemyHpBar', () => {
+  it('enemigo sano lejos no muestra barra de HP', async () => {
+    const { shouldRenderEnemyHpBar } = await import('./arena');
+    const farHealthy = { ...base, x: ARENA.CENTER, y: ARENA.CENTER + 150, hp: 10, maxHp: 10, isBoss: false } as Enemy;
+    expect(shouldRenderEnemyHpBar(farHealthy)).toBe(false);
+  });
+
+  it('enemigo dañado lejos muestra barra de HP', async () => {
+    const { shouldRenderEnemyHpBar } = await import('./arena');
+    const farDamaged = { ...base, x: ARENA.CENTER, y: ARENA.CENTER + 150, hp: 7, maxHp: 10, isBoss: false } as Enemy;
+    expect(shouldRenderEnemyHpBar(farDamaged)).toBe(true);
+  });
+
+  it('enemigo sano a < 100 px del centro muestra barra de HP', async () => {
+    const { shouldRenderEnemyHpBar } = await import('./arena');
+    const closeHealthy = { ...base, x: ARENA.CENTER, y: ARENA.CENTER + 50, hp: 10, maxHp: 10, isBoss: false } as Enemy;
+    expect(shouldRenderEnemyHpBar(closeHealthy)).toBe(true);
+  });
+
+  it('jefe intacto lejos muestra barra de HP', async () => {
+    const { shouldRenderEnemyHpBar } = await import('./arena');
+    const farBoss = { ...base, x: ARENA.CENTER, y: ARENA.CENTER + 150, hp: 100, maxHp: 100, isBoss: true } as Enemy;
+    expect(shouldRenderEnemyHpBar(farBoss)).toBe(true);
+  });
+});
+

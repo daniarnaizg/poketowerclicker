@@ -29,6 +29,7 @@ import './arena.css';
 
 const FULL_CIRCLE = Math.PI * 2;
 const HP_BAR_WIDTH = 24;
+const BOSS_HP_BAR_WIDTH = 36;
 const HP_BAR_HEIGHT = 3;
 /** Vertical gap between a circle's top edge and its HP bar. */
 const HP_BAR_GAP = 6;
@@ -119,13 +120,20 @@ export function renderBackground(
 }
 
 /** Sombra elíptica bajo el sprite, teñida con el color del tipo primario. */
-function drawShadow(ctx: CanvasRenderingContext2D, x: number, y: number, r: number, color: string): void {
-  ctx.fillStyle = 'rgba(0,0,0,0.25)';
+function drawShadow(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  r: number,
+  color: string,
+  faint = false,
+): void {
+  ctx.fillStyle = faint ? 'rgba(0,0,0,0.14)' : 'rgba(0,0,0,0.25)';
   ctx.beginPath();
   ctx.ellipse(x, y, r * 1.1, r * 0.45, 0, 0, FULL_CIRCLE);
   ctx.fill();
   ctx.strokeStyle = color;
-  ctx.lineWidth = 2;
+  ctx.lineWidth = faint ? 1 : 2;
   ctx.stroke();
 }
 
@@ -329,12 +337,17 @@ export function enemyDrawPos(enemy: Enemy): { x: number; y: number } {
   return { x: enemy.x, y: enemy.y };
 }
 
-interface DrawItem {
+export interface DrawDescriptor {
+  kind: 'enemy' | 'strike';
   y: number;
-  /** true = se pinta por encima del Pokémon central (atacantes situados debajo de él). */
   front: boolean;
-  draw: () => void;
+  x: number;
+  r: number;
+  enemy?: Enemy;
+  strike?: EnemyStrike;
 }
+
+const descriptorPool: DrawDescriptor[] = [];
 
 /** Strike más reciente de un enemigo (el de menor edad). */
 function latestStrike(strikes: readonly EnemyStrike[], enemyId: number): EnemyStrike | null {
@@ -343,52 +356,58 @@ function latestStrike(strikes: readonly EnemyStrike[], enemyId: number): EnemySt
   return best;
 }
 
-function enemyItems(
+/** Pulsing golden barrier ring around an invulnerable boss. */
+function drawBossInvulnRing(
   ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  r: number,
+  now: number,
+): void {
+  const pulse = 0.88 + 0.12 * Math.sin(now / 120);
+  const ringR = r * 1.5 * pulse;
+  ctx.strokeStyle = '#facc15';
+  ctx.lineWidth = 2.5;
+  ctx.beginPath();
+  ctx.arc(x, y, ringR, 0, FULL_CIRCLE);
+  ctx.stroke();
+  ctx.strokeStyle = 'rgba(250, 204, 21, 0.4)';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.arc(x, y, ringR + 3, 0, FULL_CIRCLE);
+  ctx.stroke();
+}
+
+export function populateDescriptors(
   enemies: readonly Enemy[],
   strikes: readonly EnemyStrike[],
-  now: number,
-): DrawItem[] {
-  const items: DrawItem[] = [];
-
-  for (const enemy of enemies) {
+): DrawDescriptor[] {
+  let idx = 0;
+  for (let i = 0; i < enemies.length; i++) {
+    const enemy = enemies[i];
     if (!enemy.alive) continue;
     const r = enemyRadius(enemy);
     const pos = enemyDrawPos(enemy);
-    const anchored = !!(enemy.isBoss && enemy.anchoredAtBastion);
-    items.push({
-      y: pos.y,
-      front: anchored && pos.y > ARENA.CENTER,
-      draw: () => {
-        const set = getSprite(speciesForEnemy(enemy));
-        if (set) {
-          drawShadow(ctx, pos.x, pos.y + r * 1.2, r, typeColor(enemy.types[0]));
-          const row = dirRow(ARENA.CENTER - pos.x, ARENA.CENTER - pos.y);
-          if (anchored) {
-            // Jefe en el Bastión: Attack en cada golpe y Idle entre golpes.
-            const strike = latestStrike(strikes, enemy.id);
-            const atkMs = set.attack ? animDurationMs(set, 'attack') : 0;
-            if (strike && set.attack && strike.age * 1000 < atkMs + ATTACK_HOLD_MS) {
-              drawSprite(ctx, set, 'attack', row, Math.min(strike.age * 1000, atkMs - 1), pos.x, pos.y, r * 4, 'walk');
-            } else {
-              drawSprite(ctx, set, set.idle ? 'idle' : 'walk', row, now + enemy.id * 137, pos.x, pos.y, r * 4, 'walk');
-            }
-          } else {
-            drawSprite(ctx, set, 'walk', row, now + enemy.id * 137, pos.x, pos.y, r * 4);
-          }
-        } else {
-          drawEntityCircle(ctx, pos.x, pos.y, r, typeColor(enemy.types[0]));
-          drawTypeLabel(ctx, enemy.types, pos.x, pos.y);
-        }
-        if (enemy.isBoss) drawCrown(ctx, pos.x, pos.y - r * 2 + 2);
-        drawStatusPips(ctx, enemy, pos.x, pos.y - r * 2 - HP_BAR_GAP - 11);
-      },
-    });
+    const anchored = Boolean(enemy.isBoss && enemy.anchoredAtBastion);
+    const front = anchored && pos.y > ARENA.CENTER;
+    let desc = descriptorPool[idx];
+    if (!desc) {
+      desc = { kind: 'enemy', y: pos.y, front, x: pos.x, r, enemy };
+      descriptorPool.push(desc);
+    } else {
+      desc.kind = 'enemy';
+      desc.y = pos.y;
+      desc.front = front;
+      desc.x = pos.x;
+      desc.r = r;
+      desc.enemy = enemy;
+      desc.strike = undefined;
+    }
+    idx++;
   }
 
-  // Enemigos normales que acaban de llegar al Bastión: ya están muertos para la simulación,
-  // pero se ven atacar (animación Attack completa) y se desvanecen.
-  for (const st of strikes) {
+  for (let i = 0; i < strikes.length; i++) {
+    const st = strikes[i];
     if (st.isBoss) continue;
     const set = getSprite(speciesForEnemy(st));
     if (!set) continue;
@@ -398,21 +417,85 @@ function enemyItems(
     if (ageMs >= lifeMs) continue;
     const r = ARENA.ENEMY_HITBOX_R;
     const pos = pushOutward(st.x, st.y, STRIKE_DRAW_DIST);
-    items.push({
-      y: pos.y,
-      front: pos.y > ARENA.CENTER,
-      draw: () => {
-        ctx.globalAlpha = Math.max(0, Math.min(1, (lifeMs - ageMs) / GHOST_FADE_MS));
-        drawShadow(ctx, pos.x, pos.y + r * 1.2, r, typeColor(st.types[0]));
-        const row = dirRow(ARENA.CENTER - pos.x, ARENA.CENTER - pos.y);
-        if (set.attack) drawSprite(ctx, set, 'attack', row, Math.min(ageMs, atkMs - 1), pos.x, pos.y, r * 4, 'walk');
-        else drawSprite(ctx, set, 'walk', row, now, pos.x, pos.y, r * 4);
-        ctx.globalAlpha = 1;
-      },
-    });
+    const front = pos.y > ARENA.CENTER;
+    let desc = descriptorPool[idx];
+    if (!desc) {
+      desc = { kind: 'strike', y: pos.y, front, x: pos.x, r, strike: st };
+      descriptorPool.push(desc);
+    } else {
+      desc.kind = 'strike';
+      desc.y = pos.y;
+      desc.front = front;
+      desc.x = pos.x;
+      desc.r = r;
+      desc.enemy = undefined;
+      desc.strike = st;
+    }
+    idx++;
   }
 
-  return items;
+  descriptorPool.length = idx;
+  descriptorPool.sort((p, q) => p.y - q.y);
+  return descriptorPool;
+}
+
+export function drawDescriptor(
+  ctx: CanvasRenderingContext2D,
+  d: DrawDescriptor,
+  strikes: readonly EnemyStrike[],
+  now: number,
+  aliveCount: number,
+): void {
+  if (d.kind === 'enemy') {
+    const enemy = d.enemy!;
+    const r = d.r;
+    const pos = { x: d.x, y: d.y };
+    const anchored = Boolean(enemy.isBoss && enemy.anchoredAtBastion);
+    const set = getSprite(speciesForEnemy(enemy));
+    const faintShadow = aliveCount > 40 && !enemy.isBoss;
+
+    if (enemy.isBoss && (enemy.bossInvulnSec ?? 0) > 0) {
+      drawBossInvulnRing(ctx, pos.x, pos.y, r, now);
+    }
+
+    if (set) {
+      drawShadow(ctx, pos.x, pos.y + r * 1.2, r, typeColor(enemy.types[0]), faintShadow);
+      const row = dirRow(ARENA.CENTER - pos.x, ARENA.CENTER - pos.y);
+      if (anchored) {
+        const strike = latestStrike(strikes, enemy.id);
+        const atkMs = set.attack ? animDurationMs(set, 'attack') : 0;
+        if (strike && set.attack && strike.age * 1000 < atkMs + ATTACK_HOLD_MS) {
+          drawSprite(ctx, set, 'attack', row, Math.min(strike.age * 1000, atkMs - 1), pos.x, pos.y, r * 4, 'walk');
+        } else {
+          drawSprite(ctx, set, set.idle ? 'idle' : 'walk', row, now + enemy.id * 137, pos.x, pos.y, r * 4, 'walk');
+        }
+      } else {
+        const animTime = enemy.isBoss ? now : Math.floor(now / 50) * 50;
+        drawSprite(ctx, set, 'walk', row, animTime + enemy.id * 137, pos.x, pos.y, r * 4);
+      }
+    } else {
+      drawEntityCircle(ctx, pos.x, pos.y, r, typeColor(enemy.types[0]));
+      drawTypeLabel(ctx, enemy.types, pos.x, pos.y);
+    }
+    if (enemy.isBoss) drawCrown(ctx, pos.x, pos.y - r * 2 + 2);
+    drawStatusPips(ctx, enemy, pos.x, pos.y - r * 2 - HP_BAR_GAP - 11);
+  } else {
+    const st = d.strike!;
+    const set = getSprite(speciesForEnemy(st));
+    if (!set) return;
+    const atkMs = set.attack ? animDurationMs(set, 'attack') : 0;
+    const lifeMs = atkMs + ATTACK_HOLD_MS;
+    const ageMs = st.age * 1000;
+    ctx.globalAlpha = Math.max(0, Math.min(1, (lifeMs - ageMs) / GHOST_FADE_MS));
+    drawShadow(ctx, d.x, d.y + d.r * 1.2, d.r, typeColor(st.types[0]), aliveCount > 40);
+    const row = dirRow(ARENA.CENTER - d.x, ARENA.CENTER - d.y);
+    if (set.attack) {
+      drawSprite(ctx, set, 'attack', row, Math.min(ageMs, atkMs - 1), d.x, d.y, d.r * 4, 'walk');
+    } else {
+      drawSprite(ctx, set, 'walk', row, now, d.x, d.y, d.r * 4);
+    }
+    ctx.globalAlpha = 1;
+  }
 }
 
 /**
@@ -427,10 +510,17 @@ export function renderEnemies(
   strikes: readonly EnemyStrike[] = [],
   layer: 'all' | 'back' | 'front' = 'all',
 ): void {
-  const items = enemyItems(ctx, enemies, strikes, now)
-    .filter((it) => layer === 'all' || (layer === 'front') === it.front)
-    .sort((p, q) => p.y - q.y);
-  for (const it of items) it.draw();
+  const items = populateDescriptors(enemies, strikes);
+  let aliveCount = 0;
+  for (let i = 0; i < enemies.length; i++) {
+    if (enemies[i].alive) aliveCount++;
+  }
+  for (let i = 0; i < items.length; i++) {
+    const d = items[i];
+    if (layer === 'all' || (layer === 'front') === d.front) {
+      drawDescriptor(ctx, d, strikes, now, aliveCount);
+    }
+  }
 }
 
 function drawCrown(ctx: CanvasRenderingContext2D, x: number, y: number): void {
@@ -481,6 +571,18 @@ export function renderFloatingText(
   ctx.globalAlpha = 1;
 }
 
+/**
+ * Determina si debe dibujarse la barra de HP sobre un enemigo (§5 ítem ★3).
+ * Solo se dibuja si es jefe, está dañado (hp < maxHp) o está cerca del Bastión (< 100 px).
+ */
+export function shouldRenderEnemyHpBar(enemy: Enemy): boolean {
+  return Boolean(
+    enemy.isBoss ||
+    enemy.hp < enemy.maxHp ||
+    Math.hypot(enemy.x - ARENA.CENTER, enemy.y - ARENA.CENTER) < 100
+  );
+}
+
 export function renderHPBar(
   ctx: CanvasRenderingContext2D,
   entity: Entity,
@@ -496,6 +598,18 @@ export function renderHPBar(
   ctx.fillRect(left, y, width, HP_BAR_HEIGHT);
   ctx.fillStyle = hpBarColor(ratio);
   ctx.fillRect(left, y, Math.round(width * ratio), HP_BAR_HEIGHT);
+
+  const e = entity as Partial<Enemy>;
+  if (e.isBoss) {
+    ctx.fillStyle = INK;
+    ctx.fillRect(left + Math.round(width * 0.33), y, 1, HP_BAR_HEIGHT);
+    ctx.fillRect(left + Math.round(width * 0.66), y, 1, HP_BAR_HEIGHT);
+    if ((e.bossInvulnSec ?? 0) > 0) {
+      ctx.strokeStyle = '#facc15';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(left - 1, y - 1, width + 2, HP_BAR_HEIGHT + 2);
+    }
+  }
 }
 
 function hpBarColor(ratio: number): string {
@@ -565,17 +679,31 @@ export class ArenaRenderer {
     renderBackground(ctx, biome);
     if ((state.bastionShieldSec ?? 0) > 0) drawShield(ctx, state.bastionShieldSec ?? 0, now);
     const strikes = state.strikes ?? [];
-    renderEnemies(ctx, state.enemies, now, strikes, 'back');
+    let aliveCount = 0;
+    for (let i = 0; i < state.enemies.length; i++) {
+      if (state.enemies[i].alive) aliveCount++;
+    }
+    const descriptors = populateDescriptors(state.enemies, strikes);
+
+    for (let i = 0; i < descriptors.length; i++) {
+      const d = descriptors[i];
+      if (!d.front) drawDescriptor(ctx, d, strikes, now, aliveCount);
+    }
     renderProjectiles(ctx, state.projectiles, now);
     if (active) renderPokemon(ctx, active, C, C, { now, dx, dy, anim, animMs });
-    renderEnemies(ctx, state.enemies, now, strikes, 'front');
+    for (let i = 0; i < descriptors.length; i++) {
+      const d = descriptors[i];
+      if (d.front) drawDescriptor(ctx, d, strikes, now, aliveCount);
+    }
     renderEffects(ctx, state.effects ?? []);
     renderFloatingText(ctx, state.floatingTexts);
 
-    for (const enemy of state.enemies) {
-      if (!enemy.alive) continue;
+    for (let i = 0; i < state.enemies.length; i++) {
+      const enemy = state.enemies[i];
+      if (!enemy.alive || !shouldRenderEnemyHpBar(enemy)) continue;
       const pos = enemyDrawPos(enemy);
-      renderHPBar(ctx, enemy, pos.x, pos.y - enemyRadius(enemy) * 2 - HP_BAR_GAP, HP_BAR_WIDTH);
+      const width = enemy.isBoss ? BOSS_HP_BAR_WIDTH : HP_BAR_WIDTH;
+      renderHPBar(ctx, enemy, pos.x, pos.y - enemyRadius(enemy) * 2 - HP_BAR_GAP, width);
     }
     if (active) {
       renderHPBar(ctx, active, C, C - ARENA.PLAYER_HITBOX_R * 2 - HP_BAR_GAP, HP_BAR_WIDTH);
