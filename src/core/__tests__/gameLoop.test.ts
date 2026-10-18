@@ -6,13 +6,17 @@ import { POKEDEX } from '../../data/pokemon';
 import { TYPE_CHART } from '../damage';
 import { ARENA } from '../../config/arena.config';
 import {
+  ALIVE_CAP,
   BOSS_HP_MULTIPLIER,
   BOSS_TIMER_DURATION,
   HOT_SWAP_COOLDOWN,
   INTER_WAVE_BREAK_SEC,
   LEAK_BASE_DAMAGE,
   WAVE_ENEMY_COUNT_BASE,
+  bossHp,
   enemyHp,
+  floorEnemyCount,
+  floorSpawnWindowSec,
   leakDamageForFloor,
 } from '../../config/balance.config';
 import { getEnemyDef } from '../../data/enemies';
@@ -82,7 +86,7 @@ describe('generateWave', () => {
     expect(wave).toHaveLength(WAVE_ENEMY_COUNT_BASE);
     expect(wave.every((e) => !e.isBoss)).toBe(true);
     for (const enemy of wave) {
-      expect(Math.hypot(enemy.x - ARENA.CENTER, enemy.y - ARENA.CENTER)).toBeCloseTo(ARENA.CENTER, 5);
+      expect(Math.hypot(enemy.x - ARENA.CENTER, enemy.y - ARENA.CENTER)).toBeCloseTo(ARENA.SPAWN_HALF_EXTENT, 5);
       const def = getEnemyDef(enemy.definitionId);
       expect(enemy.hp).toBe(Math.max(1, Math.floor(enemyHp(5) * (def.hpFactor ?? 1))));
     }
@@ -93,7 +97,7 @@ describe('generateWave', () => {
     const wave = generateWave(10, mulberry32(2));
     expect(wave).toHaveLength(1);
     expect(wave[0].isBoss).toBe(true);
-    expect(wave[0].hp).toBe(enemyHp(10) * BOSS_HP_MULTIPLIER);
+    expect(wave[0].hp).toBe(bossHp(10, getEnemyDef(wave[0].definitionId).hpFactor ?? 1));
     expect(wave[0].bossTimerSec).toBe(BOSS_TIMER_DURATION);
   });
 
@@ -112,8 +116,8 @@ describe('tickGame', () => {
     expect(state.floor).toBe(1);
     expect(state.team[0].isActive).toBe(true);
     expect(state.team[0].pokemon?.definitionId).toBe('0004');
-    expect(state.enemies).toHaveLength(WAVE_ENEMY_COUNT_BASE);
-    expect(state.waveEnemiesRemaining).toBe(WAVE_ENEMY_COUNT_BASE);
+    expect(state.enemies).toHaveLength(1);
+    expect(state.waveEnemiesRemaining).toBe(floorEnemyCount(1));
   });
 
   it('is deterministic for a given seed', () => {
@@ -172,7 +176,11 @@ describe('tickGame', () => {
     expect(next.floor).toBe(2);
     expect(next.interWaveTimerSec).toBeUndefined();
     expect(next.enemies.length).toBeGreaterThan(0);
-    expect(next.waveEnemiesRemaining).toBe(next.enemies.length);
+    expect(next.waveEnemiesRemaining).toBe(
+      (next.floorRuntime!.plan.events.length - next.floorRuntime!.nextEventIdx) +
+        next.enemies.filter((e) => e.alive).length,
+    );
+    expect(next.waveEnemiesRemaining).toBe(floorEnemyCount(2));
   });
 
   it('waits for the player when auto-advance is off', () => {
@@ -226,7 +234,7 @@ describe('tickGame', () => {
     expect(activeAfter.hp).toBe(activeBefore.hp);
   });
 
-  it('scales contact damage with the floor using leakDamageForFloor', () => {
+  it('scales enemy leak damage with the floor so high floors punish harder than floor 1', () => {
     const leakDamage = (floor: number): number => {
       const base = startingRun(43);
       const activeSlot = base.team.findIndex((s) => s.isActive);
@@ -249,7 +257,7 @@ describe('tickGame', () => {
     };
     expect(leakDamage(1)).toBe(leakDamageForFloor(1));
     expect(leakDamage(41)).toBe(leakDamageForFloor(41));
-    expect(leakDamage(41)).toBeGreaterThan(leakDamage(1));
+    expect(leakDamage(41) * floorEnemyCount(41)).toBeGreaterThan(leakDamage(1) * floorEnemyCount(1));
   });
 
   it('boss anchors at bastion perimeter instead of disappearing on contact (Decision D1)', () => {
@@ -689,6 +697,120 @@ describe('Block 3A.2-V — Individual Vitality & Route Stop Config', () => {
       const breatherHpSum = s.team.reduce((sum, sl) => sum + (sl.pokemon?.hp ?? 0), 0);
       expect(breatherHpSum).toBeLessThanOrEqual(initialHpSum);
     });
+  });
+});
+
+describe('WP3 — Continuous Spawner Queue & ALIVE_CAP', () => {
+  it('caps alive enemies at ALIVE_CAP, keeps pending events in queue, and emits from queue upon kills', () => {
+    // Floor 85 has floorEnemyCount(85) = 93 > ALIVE_CAP (70)
+    expect(floorEnemyCount(85)).toBe(93);
+    expect(floorEnemyCount(85)).toBeGreaterThan(ALIVE_CAP);
+
+    const base = startingRun(42);
+    // Transition to floor 85 by setting floor 84 with breather expiring
+    const cleared: GameState = {
+      ...base,
+      floor: 84,
+      enemies: [],
+      waveEnemiesRemaining: 0,
+      interWaveTimerSec: 0.01,
+    };
+    let state = tickGame(cleared, {}, config, 16.7, mulberry32(1));
+    expect(state.floor).toBe(85);
+    expect(state.floorRuntime?.plan.events.length).toBe(93);
+
+    // Passive player: set atk: 0 on active Pokémon so projectiles do not kill enemies
+    state = {
+      ...state,
+      team: state.team.map((s) =>
+        s.isActive && s.pokemon ? { ...s, pokemon: { ...s.pokemon, atk: 0 } } : s,
+      ) as Team6,
+      enemies: state.enemies.map((e) => ({ ...e, speed: 0 })),
+    };
+
+    const spawnWindowSec = floorSpawnWindowSec(85);
+    const rng = mulberry32(100);
+
+    // Advance across the entire spawn window
+    while (state.floorRuntime!.elapsedSec < spawnWindowSec) {
+      state = tickGame(state, {}, config, 16.7, rng);
+      expect(state.enemies.filter((e) => e.alive).length).toBeLessThanOrEqual(ALIVE_CAP);
+      // Freeze newly spawned enemies so they don't reach bastion center and leak
+      state = {
+        ...state,
+        enemies: state.enemies.map((e) => (e.speed > 0 ? { ...e, speed: 0 } : e)),
+      };
+    }
+
+    // At the end of the spawn window: alive enemies must be capped at ALIVE_CAP (70)
+    const aliveCount = state.enemies.filter((e) => e.alive).length;
+    expect(aliveCount).toBe(ALIVE_CAP);
+
+    // Spawner queue retains 93 - 70 = 23 pending events
+    const pendingEvents = state.floorRuntime!.plan.events.length - state.floorRuntime!.nextEventIdx;
+    expect(pendingEvents).toBe(23);
+    expect(state.floorRuntime!.nextEventIdx).toBe(70);
+    expect(state.waveEnemiesRemaining).toBe(93);
+
+    // Eliminate 10 alive enemies
+    let killed = 0;
+    const enemiesWith10Killed = state.enemies.map((e) => {
+      if (e.alive && killed < 10) {
+        killed++;
+        return { ...e, alive: false, hp: 0 };
+      }
+      return e;
+    });
+    state = {
+      ...state,
+      enemies: enemiesWith10Killed,
+      waveEnemiesRemaining:
+        (state.floorRuntime!.plan.events.length - state.floorRuntime!.nextEventIdx) +
+        enemiesWith10Killed.filter((e) => e.alive).length,
+    };
+    expect(state.enemies.filter((e) => e.alive).length).toBe(60);
+    expect(state.waveEnemiesRemaining).toBe(83);
+
+    // Next tick: exactly 10 events are emitted from queue to refill to ALIVE_CAP without losing any
+    state = tickGame(state, {}, config, 16.7, rng);
+
+    expect(state.enemies.filter((e) => e.alive).length).toBe(ALIVE_CAP);
+    expect(state.floorRuntime!.nextEventIdx).toBe(80);
+    expect(state.floorRuntime!.plan.events.length - state.floorRuntime!.nextEventIdx).toBe(13);
+    expect(state.waveEnemiesRemaining).toBe(83);
+  });
+
+  it('strictly satisfies state.waveEnemiesRemaining === pending queue events + alive enemies on every tick', () => {
+    let state = startingRun(1);
+    const rng = mulberry32(77);
+    for (let i = 0; i < 200; i++) {
+      state = tickGame(state, {}, config, 16.7, rng);
+      if (state.floorRuntime && state.phase === 'PLAYING') {
+        const pending = state.floorRuntime.plan.events.length - state.floorRuntime.nextEventIdx;
+        const alive = state.enemies.filter((e) => e.alive).length;
+        expect(state.waveEnemiesRemaining).toBe(pending + alive);
+      }
+    }
+  });
+
+  it('pauses floorRuntime elapsedSec and prevents enemy spawns while state.shop is defined', () => {
+    const base = startingRun(1);
+    const withShop: GameState = {
+      ...base,
+      shop: { beforeFloor: 5 },
+    };
+    const elapsedBefore = withShop.floorRuntime!.elapsedSec;
+    const enemiesBefore = withShop.enemies.length;
+    const nextEventBefore = withShop.floorRuntime!.nextEventIdx;
+
+    let state = withShop;
+    for (let i = 0; i < 60; i++) {
+      state = tickGame(state, {}, config, 16.7, mulberry32(i));
+    }
+
+    expect(state.floorRuntime!.elapsedSec).toBe(elapsedBefore);
+    expect(state.enemies.length).toBe(enemiesBefore);
+    expect(state.floorRuntime!.nextEventIdx).toBe(nextEventBefore);
   });
 });
 
