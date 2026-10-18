@@ -368,7 +368,7 @@ export interface EnemyStrike {
 /** Purely cosmetic effect; the core ages and expires it like floating text. */
 export interface VisualEffect {
   id: number;
-  kind: 'BEAM' | 'NOVA' | 'FLASH' | 'RING';
+  kind: 'BEAM' | 'NOVA' | 'FLASH' | 'RING' | 'IMPACT';
   /** Origin (arena logical px). */
   x: number;
   y: number;

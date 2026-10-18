@@ -1,0 +1,164 @@
+{
+  "projectiles": {
+    "w": 64,
+    "h": 288,
+    "frameW": 16,
+    "frameH": 16,
+    "frames": 4,
+    "types": {
+      "normal": {
+        "y": 0,
+        "index": 0
+      },
+      "fire": {
+        "y": 16,
+        "index": 1
+      },
+      "water": {
+        "y": 32,
+        "index": 2
+      },
+      "grass": {
+        "y": 48,
+        "index": 3
+      },
+      "electric": {
+        "y": 64,
+        "index": 4
+      },
+      "ice": {
+        "y": 80,
+        "index": 5
+      },
+      "fighting": {
+        "y": 96,
+        "index": 6
+      },
+      "poison": {
+        "y": 112,
+        "index": 7
+      },
+      "ground": {
+        "y": 128,
+        "index": 8
+      },
+      "flying": {
+        "y": 144,
+        "index": 9
+      },
+      "psychic": {
+        "y": 160,
+        "index": 10
+      },
+      "bug": {
+        "y": 176,
+        "index": 11
+      },
+      "rock": {
+        "y": 192,
+        "index": 12
+      },
+      "ghost": {
+        "y": 208,
+        "index": 13
+      },
+      "dragon": {
+        "y": 224,
+        "index": 14
+      },
+      "dark": {
+        "y": 240,
+        "index": 15
+      },
+      "steel": {
+        "y": 256,
+        "index": 16
+      },
+      "fairy": {
+        "y": 272,
+        "index": 17
+      }
+    }
+  },
+  "impacts": {
+    "w": 192,
+    "h": 576,
+    "frameW": 32,
+    "frameH": 32,
+    "frames": 6,
+    "types": {
+      "normal": {
+        "y": 0,
+        "index": 0
+      },
+      "fire": {
+        "y": 32,
+        "index": 1
+      },
+      "water": {
+        "y": 64,
+        "index": 2
+      },
+      "grass": {
+        "y": 96,
+        "index": 3
+      },
+      "electric": {
+        "y": 128,
+        "index": 4
+      },
+      "ice": {
+        "y": 160,
+        "index": 5
+      },
+      "fighting": {
+        "y": 192,
+        "index": 6
+      },
+      "poison": {
+        "y": 224,
+        "index": 7
+      },
+      "ground": {
+        "y": 256,
+        "index": 8
+      },
+      "flying": {
+        "y": 288,
+        "index": 9
+      },
+      "psychic": {
+        "y": 320,
+        "index": 10
+      },
+      "bug": {
+        "y": 352,
+        "index": 11
+      },
+      "rock": {
+        "y": 384,
+        "index": 12
+      },
+      "ghost": {
+        "y": 416,
+        "index": 13
+      },
+      "dragon": {
+        "y": 448,
+        "index": 14
+      },
+      "dark": {
+        "y": 480,
+        "index": 15
+      },
+      "steel": {
+        "y": 512,
+        "index": 16
+      },
+      "fairy": {
+        "y": 544,
+        "index": 17
+      }
+    }
+  }
+}

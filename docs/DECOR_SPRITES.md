@@ -32,26 +32,13 @@ Viven en `public/decor/<bioma>.png`:
 3. **Guarda el fichero PNG**.
 4. **Recarga la pestaña del navegador**: el juego cargará automáticamente tu hoja editada.
 5. **Si necesitas cambiar el tamaño o mover un sprite**:
-   - Puedes ajustar directamente las coordenadas `(x, y, w, h)` en `public/decor/decor_atlas.json`.
-   - O si prefieres regenerar la hoja desde el código procedural, ejecuta el script de exportación.
-
----
-
-## Regenerar las hojas con el exportador
-
-El proyecto incluye un script en `scripts/export-decor.ts` configurado en `package.json`:
-
-```bash
-npm run export:decor                     # Crea solo las hojas que no existan (conserva tus ediciones)
-npm run export:decor -- --force          # Regenera TODAS las hojas (sobrescribe ediciones con el procedural)
-npm run export:decor -- --only=ruta_verde # Regenera solo la hoja indicada
-```
+   - Ajusta directamente las coordenadas `(x, y, w, h)` en `public/decor/decor_atlas.json` y `src/renderer/decorAtlas.ts`.
 
 ---
 
 ## Añadir un sprite nuevo
 
-1. Añade la función generadora en `src/renderer/decorCatalog.ts`.
-2. Añade el sprite a la fila deseada en `SHEET_LAYOUT` en `scripts/export-decor.ts`.
-3. Ejecuta `npm run export:decor -- --force` para recalcular el atlas y la hoja.
-4. Ya puedes usarlo por nombre en `cornerTemplates` o `microKit` de `src/renderer/backdrop.ts`.
+1. Dibuja el sprite en la spritesheet correspondiente (`public/decor/<bioma>.png`) dejando al menos 4 px de margen.
+2. Declara su entrada en `public/decor/decor_atlas.json` y en `DECOR_ATLAS.frames` en `src/renderer/decorAtlas.ts` con sus coordenadas y dimensiones.
+3. Ya puedes usarlo por nombre en `cornerTemplates` o `microKit` de `src/renderer/backdrop.ts`.
+
