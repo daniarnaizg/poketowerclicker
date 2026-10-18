@@ -230,15 +230,38 @@ function tickStatus(statuses: readonly StatusInstance[], dt: number): StatusInst
 // Hits
 // ---------------------------------------------------------------------------
 
+interface DamageApplicationResult {
+  appliedAmount: number;
+  killed: boolean;
+  goldGained: number;
+  phaseTriggered?: 2 | 3;
+}
+
+function applyDamageToEnemy(
+  enemy: Enemy,
+  rawAmount: number,
+  goldMult: number,
+): DamageApplicationResult {
+  if (!enemy.alive || rawAmount <= 0) {
+    return { appliedAmount: 0, killed: false, goldGained: 0 };
+  }
+  const prevHp = enemy.hp;
+  enemy.hp = prevHp - rawAmount;
+  const appliedAmount = rawAmount;
+  let killed = false;
+  let goldGained = 0;
+  if (enemy.hp <= 0) {
+    enemy.alive = false;
+    killed = true;
+    goldGained = enemy.tier === 'add' ? 0 : Math.floor(enemy.goldValue * goldMult);
+  }
+  return { appliedAmount, killed, goldGained };
+}
+
 interface HitOutcome {
   amount: number;
   killed: boolean;
   goldGained: number;
-}
-
-/** Gold paid for killing `enemy` (UP_GOLD + GOLD bench passives, additive). */
-function goldFor(enemy: Enemy, state: GameState, bonuses: TeamBonuses): number {
-  return Math.floor(enemy.goldValue * (goldMultiplier(state.bastionUpgrades) + bonuses.gold));
 }
 
 /** Apply one damage instance to a (cloned) enemy and report the outcome. */
@@ -260,16 +283,12 @@ function hitEnemy(
     rng,
     config.typeChart,
   );
-  enemy.hp -= event.amount;
-
-  let killed = false;
-  let goldGained = 0;
-  if (enemy.alive && enemy.hp <= 0) {
-    enemy.alive = false;
-    killed = true;
-    goldGained = goldFor(enemy, state, bonuses);
-  }
-  return { amount: event.amount, killed, goldGained };
+  const result = applyDamageToEnemy(
+    enemy,
+    event.amount,
+    goldMultiplier(state.bastionUpgrades) + bonuses.gold,
+  );
+  return { amount: result.appliedAmount, killed: result.killed, goldGained: result.goldGained };
 }
 
 function aimProjectileAtPoint(p: Projectile, tx: number, ty: number, speed: number): void {
@@ -454,22 +473,24 @@ function applySwitchInBurst(
       rng,
       config.typeChart,
     );
-    enemy.hp -= event.amount;
-    damageDelta += event.amount;
-    damagePerSlot[slotIndex] += event.amount;
+    const result = applyDamageToEnemy(
+      enemy,
+      event.amount,
+      goldMultiplier(bastionUpgrades) + bonuses.gold,
+    );
+    damageDelta += result.appliedAmount;
+    damagePerSlot[slotIndex] += result.appliedAmount;
 
-    if (enemy.alive && enemy.hp <= 0) {
-      enemy.alive = false;
+    if (result.killed) {
       killsDelta += 1;
-      const goldGained = Math.floor(enemy.goldValue * (goldMultiplier(bastionUpgrades) + bonuses.gold));
-      goldDelta += goldGained;
+      goldDelta += result.goldGained;
       if (enemy.isBoss && !defeatedBossFloors.includes(floor)) {
         defeatedBossFloors.push(floor);
       }
     } else {
-      caught.push({ enemy, amount: event.amount });
+      caught.push({ enemy, amount: result.appliedAmount });
     }
-    floatingTexts.push(createFloatingText(nextTextId++, enemy.x, enemy.y, `${event.amount}`, '#ffd166'));
+    floatingTexts.push(createFloatingText(nextTextId++, enemy.x, enemy.y, `${result.appliedAmount}`, '#ffd166'));
   }
 
   // 3★+: the entry wave also carries a status (or a temporary bastion shield).
@@ -1158,19 +1179,21 @@ function stepOnce(state: GameState, config: GameConfig, rng: () => number): Game
       const burn = enemy.statuses.find((s) => s.id === 'BURN');
       if (burn && (burn.dps ?? 0) > 0) {
         const amount = (burn.dps ?? 0) * dt;
-        enemy.hp -= amount;
-        totalDamage += amount;
-        if (burn.sourceSlot !== undefined && burn.sourceSlot >= 0) damagePerSlot[burn.sourceSlot] += amount;
-        if (enemy.hp <= 0) {
-          enemy.alive = false;
-          const payout = goldFor(enemy, state, bonuses);
+        const result = applyDamageToEnemy(
+          enemy,
+          amount,
+          goldMultiplier(state.bastionUpgrades) + bonuses.gold,
+        );
+        totalDamage += result.appliedAmount;
+        if (burn.sourceSlot !== undefined && burn.sourceSlot >= 0) damagePerSlot[burn.sourceSlot] += result.appliedAmount;
+        if (result.killed) {
           totalKills += 1;
-          gold += payout;
-          totalGold += payout;
+          gold += result.goldGained;
+          totalGold += result.goldGained;
           if (enemy.isBoss && !defeatedBossFloors.includes(floor)) {
             defeatedBossFloors.push(floor);
           }
-          floatingTexts.push(createFloatingText(nextTextId++, enemy.x, enemy.y, `+${payout}`, '#ffd700'));
+          floatingTexts.push(createFloatingText(nextTextId++, enemy.x, enemy.y, `+${result.goldGained}`, '#ffd700'));
           continue;
         }
       }
