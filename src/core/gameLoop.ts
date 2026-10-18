@@ -18,6 +18,7 @@ import type {
   Enemy,
   EnemyStrike,
   FloatingText,
+  FloorRuntime,
   GameConfig,
   GameInput,
   GamePhase,
@@ -36,6 +37,7 @@ import type {
 } from './types';
 import { ARENA } from '../config/arena.config';
 import {
+  ALIVE_CAP,
   AOE_SPLASH_DAMAGE_FACTOR,
   AOE_SPLASH_RADIUS,
   AOE_SPLASH_STAR_MULTIPLIER,
@@ -48,6 +50,7 @@ import {
   FIXED_TIMESTEP,
   HOT_SWAP_COOLDOWN,
   INTER_WAVE_BREAK_SEC,
+  isBossFloor,
   leakDamageForFloor,
   MAX_STARS,
   PROJECTILE_BASE_DAMAGE,
@@ -64,7 +67,8 @@ import {
 } from '../config/balance.config';
 import { calculateDamage, getEffectiveness } from './damage';
 import type { DamageAttacker } from './damage';
-import { generateWave } from './waveGenerator';
+import { buildFloorPlan } from './floorPlan';
+import { spawnBossForFloor, spawnEnemyAt } from './waveGenerator';
 import { rngFor } from './rng';
 import {
   attackSpeedMultiplier,
@@ -164,6 +168,10 @@ function maxEntityId(state: GameState): number {
   return max;
 }
 
+function resolveNextEntityId(state: GameState): number {
+  return state.nextEntityId ?? maxEntityId(state) + 1;
+}
+
 function attackerOf(active: PlayerPokemon | null, types: readonly PokemonType[]): DamageAttacker {
   return {
     atk: active?.atk ?? 50,
@@ -222,15 +230,38 @@ function tickStatus(statuses: readonly StatusInstance[], dt: number): StatusInst
 // Hits
 // ---------------------------------------------------------------------------
 
+interface DamageApplicationResult {
+  appliedAmount: number;
+  killed: boolean;
+  goldGained: number;
+  phaseTriggered?: 2 | 3;
+}
+
+function applyDamageToEnemy(
+  enemy: Enemy,
+  rawAmount: number,
+  goldMult: number,
+): DamageApplicationResult {
+  if (!enemy.alive || rawAmount <= 0) {
+    return { appliedAmount: 0, killed: false, goldGained: 0 };
+  }
+  const prevHp = enemy.hp;
+  enemy.hp = prevHp - rawAmount;
+  const appliedAmount = rawAmount;
+  let killed = false;
+  let goldGained = 0;
+  if (enemy.hp <= 0) {
+    enemy.alive = false;
+    killed = true;
+    goldGained = enemy.tier === 'add' ? 0 : Math.floor(enemy.goldValue * goldMult);
+  }
+  return { appliedAmount, killed, goldGained };
+}
+
 interface HitOutcome {
   amount: number;
   killed: boolean;
   goldGained: number;
-}
-
-/** Gold paid for killing `enemy` (UP_GOLD + GOLD bench passives, additive). */
-function goldFor(enemy: Enemy, state: GameState, bonuses: TeamBonuses): number {
-  return Math.floor(enemy.goldValue * (goldMultiplier(state.bastionUpgrades) + bonuses.gold));
 }
 
 /** Apply one damage instance to a (cloned) enemy and report the outcome. */
@@ -252,16 +283,12 @@ function hitEnemy(
     rng,
     config.typeChart,
   );
-  enemy.hp -= event.amount;
-
-  let killed = false;
-  let goldGained = 0;
-  if (enemy.alive && enemy.hp <= 0) {
-    enemy.alive = false;
-    killed = true;
-    goldGained = goldFor(enemy, state, bonuses);
-  }
-  return { amount: event.amount, killed, goldGained };
+  const result = applyDamageToEnemy(
+    enemy,
+    event.amount,
+    goldMultiplier(state.bastionUpgrades) + bonuses.gold,
+  );
+  return { amount: result.appliedAmount, killed: result.killed, goldGained: result.goldGained };
 }
 
 function aimProjectileAtPoint(p: Projectile, tx: number, ty: number, speed: number): void {
@@ -332,6 +359,7 @@ function fireProjectiles(
   enemies: Enemy[],
   rng: () => number,
   bonuses: TeamBonuses,
+  allocId?: () => number,
 ): Projectile[] {
   const living = enemies.filter((e) => e.alive);
   if (living.length === 0) return [];
@@ -351,14 +379,15 @@ function fireProjectiles(
   const chainBounces =
     multi - 1 + (starsOf(active) >= STAR_PATTERN ? CHAIN_EXTRA_BOUNCES_AT_MAX_PATTERN : 0);
 
-  let id = maxEntityId(state) + 1;
+  let fallbackId = allocId ? 0 : resolveNextEntityId(state);
+  const nextId = allocId ?? (() => fallbackId++);
   const fired: Projectile[] = [];
   for (let s = 0; s < shots; s++) {
     if (active.pattern === AttackPattern.CHAIN) {
-      fired.push(createProjectile(id++, active, targets[0], speed, chainBounces));
+      fired.push(createProjectile(nextId(), active, targets[0], speed, chainBounces));
     } else {
       const count = Math.min(multi, targets.length);
-      for (let t = 0; t < count; t++) fired.push(createProjectile(id++, active, targets[t], speed, 0));
+      for (let t = 0; t < count; t++) fired.push(createProjectile(nextId(), active, targets[t], speed, 0));
     }
   }
   return fired;
@@ -444,22 +473,24 @@ function applySwitchInBurst(
       rng,
       config.typeChart,
     );
-    enemy.hp -= event.amount;
-    damageDelta += event.amount;
-    damagePerSlot[slotIndex] += event.amount;
+    const result = applyDamageToEnemy(
+      enemy,
+      event.amount,
+      goldMultiplier(bastionUpgrades) + bonuses.gold,
+    );
+    damageDelta += result.appliedAmount;
+    damagePerSlot[slotIndex] += result.appliedAmount;
 
-    if (enemy.alive && enemy.hp <= 0) {
-      enemy.alive = false;
+    if (result.killed) {
       killsDelta += 1;
-      const goldGained = Math.floor(enemy.goldValue * (goldMultiplier(bastionUpgrades) + bonuses.gold));
-      goldDelta += goldGained;
+      goldDelta += result.goldGained;
       if (enemy.isBoss && !defeatedBossFloors.includes(floor)) {
         defeatedBossFloors.push(floor);
       }
     } else {
-      caught.push({ enemy, amount: event.amount });
+      caught.push({ enemy, amount: result.appliedAmount });
     }
-    floatingTexts.push(createFloatingText(nextTextId++, enemy.x, enemy.y, `${event.amount}`, '#ffd166'));
+    floatingTexts.push(createFloatingText(nextTextId++, enemy.x, enemy.y, `${result.appliedAmount}`, '#ffd166'));
   }
 
   // 3★+: the entry wave also carries a status (or a temporary bastion shield).
@@ -532,6 +563,65 @@ function syncCooldownMirrors(team: Team6, cooldowns: Cooldowns6): Team6 {
   ) as Team6;
 }
 
+function initFloorRuntime(
+  seed: number,
+  floor: number,
+  startNextId: number,
+): { floorRuntime: FloorRuntime; initialEnemies: Enemy[]; nextId: number } {
+  const plan = buildFloorPlan(seed, floor);
+  let nextId = startNextId;
+  const initialEnemies: Enemy[] = [];
+  if (isBossFloor(floor)) {
+    const boss = spawnBossForFloor(seed, floor);
+    initialEnemies.push({ ...boss, id: nextId++ });
+  }
+  const rng = rngFor(seed, 'WAVE', floor);
+  let nextEventIdx = 0;
+  while (
+    nextEventIdx < plan.events.length &&
+    plan.events[nextEventIdx].tSec <= 0 &&
+    initialEnemies.length < ALIVE_CAP
+  ) {
+    const ev = plan.events[nextEventIdx++];
+    const e = spawnEnemyAt(ev.angle, floor, false, rng, ev.defId, ev.tier);
+    initialEnemies.push({ ...e, id: nextId++ });
+  }
+  return {
+    floorRuntime: { plan, nextEventIdx, elapsedSec: 0 },
+    initialEnemies,
+    nextId,
+  };
+}
+
+function countAliveFloorEnemies(enemies: readonly Enemy[]): number {
+  let count = 0;
+  for (let i = 0; i < enemies.length; i++) {
+    const e = enemies[i];
+    if (e.alive && !(e as Enemy & { isFleeing?: boolean }).isFleeing) count++;
+  }
+  return count;
+}
+
+function computeWaveEnemiesRemaining(
+  runtime: FloorRuntime | undefined,
+  enemies: readonly Enemy[],
+): number {
+  const pending = runtime ? Math.max(0, runtime.plan.events.length - runtime.nextEventIdx) : 0;
+  return pending + countAliveFloorEnemies(enemies);
+}
+
+function syncFloorRuntimeWithManualState(state: GameState): FloorRuntime | undefined {
+  if (!state.floorRuntime) return undefined;
+  const expected = computeWaveEnemiesRemaining(state.floorRuntime, state.enemies);
+  if (state.waveEnemiesRemaining !== expected) {
+    return {
+      ...state.floorRuntime,
+      nextEventIdx: state.floorRuntime.plan.events.length,
+    };
+  }
+  return state.floorRuntime;
+}
+
 /**
  * Start a run from a 6-slot loadout. Slot positions are preserved (hotkeys 1-6);
  * the first filled slot becomes the active Pokémon. An empty / invalid loadout
@@ -541,7 +631,7 @@ function startRun(
   state: GameState,
   loadout: readonly (LoadoutEntry | null)[],
   config: GameConfig,
-  rng: () => number,
+  _rng: () => number,
 ): GameState {
   const slots: TeamSlot[] = [];
   for (let i = 0; i < 6; i++) {
@@ -564,8 +654,21 @@ function startRun(
   const team = reconcileTeamMaxHp(slots, 1, config.pokedex, true) as Team6;
   const lead = team[first].pokemon!;
 
-  const waveRng = config.seed !== undefined ? rngFor(config.seed, 'WAVE', 1) : rng;
-  const wave = generateWave(1, waveRng);
+  const startId =
+    maxEntityId({
+      team,
+      enemies: [],
+      projectiles: [],
+      floatingTexts: [],
+      effects: [],
+      strikes: [],
+    } as unknown as GameState) + 1;
+
+  const { floorRuntime, initialEnemies, nextId } = initFloorRuntime(
+    config.seed ?? 1,
+    1,
+    startId,
+  );
 
   return {
     ...state,
@@ -573,11 +676,12 @@ function startRun(
     floor: 1,
     team,
     teamLevel: Math.max(1, state.teamLevel),
-    enemies: wave,
+    enemies: initialEnemies,
+    floorRuntime,
     projectiles: [],
-    waveEnemiesRemaining: wave.length,
-    bossTimerSec: wave.some((e) => e.isBoss)
-      ? (wave.find((e) => e.isBoss)?.bossTimerSec ?? bossTimerForFloor(1))
+    waveEnemiesRemaining: computeWaveEnemiesRemaining(floorRuntime, initialEnemies),
+    bossTimerSec: initialEnemies.some((e) => e.isBoss)
+      ? (initialEnemies.find((e) => e.isBoss)?.bossTimerSec ?? bossTimerForFloor(1))
       : undefined,
     hotSwapCooldowns: [0, 0, 0, 0, 0, 0],
     ultimateCharge: 0,
@@ -587,6 +691,7 @@ function startRun(
     autoAdvanceWave: undefined,
     bastionShieldSec: 0,
     effects: [],
+    nextEntityId: nextId,
     runStats: {
       totalKills: 0,
       totalGoldEarned: 0,
@@ -614,6 +719,8 @@ function applyHotSwap(
   if (!targetSlot || !targetSlot.pokemon || !targetSlot.pokemon.alive || targetSlot.isActive) return state;
   if (state.hotSwapCooldowns[index] > 0) return state;
 
+  const floorRuntime = syncFloorRuntimeWithManualState(state);
+
   const cooldowns = state.hotSwapCooldowns.map((c, i) =>
     i === index ? HOT_SWAP_COOLDOWN : c,
   ) as Cooldowns6;
@@ -628,6 +735,7 @@ function applyHotSwap(
   let next: GameState = {
     ...state,
     team,
+    floorRuntime,
     hotSwapCooldowns: cooldowns,
     ultimateMax: targetSlot.pokemon.ultimateMax,
     ultimateCharge: ratio * targetSlot.pokemon.ultimateMax,
@@ -639,7 +747,7 @@ function applyHotSwap(
   const floatingTexts = [...next.floatingTexts];
   const effects = [...(next.effects ?? [])];
   const defeatedBossFloors = next.runStats.defeatedBossFloors ? [...next.runStats.defeatedBossFloors] : [];
-  let nextTextId = maxEntityId(next) + 1;
+  let nextTextId = resolveNextEntityId(next);
 
   const burst = applySwitchInBurst(
     incoming,
@@ -659,14 +767,19 @@ function applyHotSwap(
     effects,
   );
 
+  const finalEnemies = enemies.filter((e) => e.alive);
+  const waveEnemiesRemaining = computeWaveEnemiesRemaining(floorRuntime, finalEnemies);
+
   return {
     ...next,
-    enemies: enemies.filter((e) => e.alive),
+    enemies: finalEnemies,
+    floorRuntime,
     gold: next.gold + burst.goldDelta,
-    waveEnemiesRemaining: Math.max(0, next.waveEnemiesRemaining - burst.killsDelta),
+    waveEnemiesRemaining,
     floatingTexts,
     effects,
     bastionShieldSec: burst.shield,
+    nextEntityId: burst.nextTextId,
     runStats: {
       ...next.runStats,
       totalKills: next.runStats.totalKills + burst.killsDelta,
@@ -687,14 +800,15 @@ function applyClick(
   const active = getActive(state);
   if (!active) return state;
 
+  let nextId = resolveNextEntityId(state);
   const speed = PROJECTILE_SPEED[active.pattern];
   const bounce =
     active.pattern === AttackPattern.CHAIN && starsOf(active) >= STAR_PATTERN
       ? CHAIN_EXTRA_BOUNCES_AT_MAX_PATTERN
       : 0;
-  const p = createProjectileAtPoint(maxEntityId(state) + 1, active, click.x, click.y, speed, bounce);
+  const p = createProjectileAtPoint(nextId++, active, click.x, click.y, speed, bounce);
 
-  const fx = createEffect(p.id + 1, 'RING', active.types[0], click.x, click.y, {
+  const fx = createEffect(nextId++, 'RING', active.types[0], click.x, click.y, {
     radius: 14,
     maxAge: 0.22,
   });
@@ -706,6 +820,7 @@ function applyClick(
     ...state,
     projectiles: [...state.projectiles, p],
     effects: [...(state.effects ?? []), fx],
+    nextEntityId: nextId,
     runStats: {
       ...state.runStats,
       manualClicks,
@@ -724,6 +839,8 @@ function applyUltimate(state: GameState, config: GameConfig, rng: () => number):
   if (!active || state.ultimateMax <= 0 || state.ultimateCharge < state.ultimateMax) return state;
   if (!state.enemies.some((e) => e.alive)) return state;
 
+  const floorRuntime = syncFloorRuntimeWithManualState(state);
+
   const slotIndex = activeSlotIndex(state);
   const ult = getUltimate(config.pokedex[active.definitionId]?.ultimate.id ?? '');
   const bonuses = computeTeamBonuses(state.team, config.pokedex);
@@ -733,12 +850,11 @@ function applyUltimate(state: GameState, config: GameConfig, rng: () => number):
   const damagePerSlot = [...state.runStats.damagePerSlot];
   const floatingTexts = [...state.floatingTexts];
   const effects = [...(state.effects ?? [])];
-  let nextTextId = maxEntityId(state) + 1;
+  let nextTextId = resolveNextEntityId(state);
   let gold = state.gold;
   let totalKills = state.runStats.totalKills;
   let totalGold = state.runStats.totalGoldEarned;
   let totalDamage = state.runStats.totalDamageDealt;
-  let remaining = state.waveEnemiesRemaining;
   let defeatedBossFloors = state.runStats.defeatedBossFloors ? [...state.runStats.defeatedBossFloors] : [];
 
   // Targeting by shape.
@@ -787,21 +903,25 @@ function applyUltimate(state: GameState, config: GameConfig, rng: () => number):
       if (enemy.isBoss && !defeatedBossFloors.includes(state.floor)) {
         defeatedBossFloors.push(state.floor);
       }
-      remaining = Math.max(0, remaining - 1);
       floatingTexts.push(createFloatingText(nextTextId++, enemy.x, enemy.y, `+${outcome.goldGained}`, '#ffd700'));
     } else if (ult.status) {
       applyStatus(enemy, ult.status, ULTIMATE_STATUS_DURATION, { sourceDamage: outcome.amount, slot: slotIndex });
     }
   }
 
+  const finalEnemies = enemies.filter((e) => e.alive);
+  const waveEnemiesRemaining = computeWaveEnemiesRemaining(floorRuntime, finalEnemies);
+
   return {
     ...state,
-    enemies: enemies.filter((e) => e.alive),
+    enemies: finalEnemies,
+    floorRuntime,
     gold,
-    waveEnemiesRemaining: remaining,
+    waveEnemiesRemaining,
     floatingTexts,
     effects,
     ultimateCharge: 0,
+    nextEntityId: nextTextId,
     runStats: {
       ...state.runStats,
       totalKills,
@@ -851,6 +971,10 @@ function applyInput(
 
 /** One fixed simulation step (dt = FIXED_TIMESTEP). */
 function stepOnce(state: GameState, config: GameConfig, rng: () => number): GameState {
+  if (Boolean(state.shop)) {
+    return state;
+  }
+
   const dt = FIXED_TIMESTEP;
   let team = state.team.map((s) => ({
     ...s,
@@ -877,9 +1001,33 @@ function stepOnce(state: GameState, config: GameConfig, rng: () => number): Game
   const strikes: EnemyStrike[] = (state.strikes ?? [])
     .map((st) => ({ ...st, age: st.age + dt }))
     .filter((st) => st.age < st.maxAge);
-  let nextTextId = maxEntityId(state) + 1;
+  let nextTextId = resolveNextEntityId(state);
   let lastKillerType: PokemonType | undefined;
   let leaksThisWave = 0;
+
+  let floorRuntime = syncFloorRuntimeWithManualState(state);
+  if (floorRuntime) {
+    const hasInvulnBoss = enemies.some((e) => e.alive && e.isBoss && (e.bossInvulnSec ?? 0) > 0);
+    if (!hasInvulnBoss) {
+      floorRuntime = { ...floorRuntime, elapsedSec: floorRuntime.elapsedSec + dt };
+      while (
+        floorRuntime.nextEventIdx < floorRuntime.plan.events.length &&
+        floorRuntime.plan.events[floorRuntime.nextEventIdx].tSec <= floorRuntime.elapsedSec &&
+        countAliveFloorEnemies(enemies) < ALIVE_CAP
+      ) {
+        const ev = floorRuntime.plan.events[floorRuntime.nextEventIdx++];
+        const e = spawnEnemyAt(
+          ev.angle,
+          state.floor,
+          false,
+          rngFor((config.seed ?? 1) ^ (ev.index * 0x9e3779b9), 'WAVE', state.floor),
+          ev.defId,
+          ev.tier,
+        );
+        enemies.push({ ...e, id: nextTextId++ });
+      }
+    }
+  }
 
   /** Records a cosmetic attack so the renderer can play the Attack animation. */
   const recordStrike = (enemy: Enemy): void => {
@@ -902,7 +1050,6 @@ function stepOnce(state: GameState, config: GameConfig, rng: () => number): Game
   let totalKills = state.runStats.totalKills;
   let totalGold = state.runStats.totalGoldEarned;
   let totalDamage = state.runStats.totalDamageDealt;
-  let waveEnemiesRemaining = state.waveEnemiesRemaining;
   let bossTimerSec = state.bossTimerSec;
   let ultimateCharge = state.ultimateCharge;
   let ultimateMax = state.ultimateMax;
@@ -1011,7 +1158,6 @@ function stepOnce(state: GameState, config: GameConfig, rng: () => number): Game
       totalKills += burst.killsDelta;
       gold += burst.goldDelta;
       totalGold += burst.goldDelta;
-      waveEnemiesRemaining = Math.max(0, waveEnemiesRemaining - burst.killsDelta);
       nextTextId = burst.nextTextId;
     } else {
       phase = 'GAME_OVER';
@@ -1033,20 +1179,21 @@ function stepOnce(state: GameState, config: GameConfig, rng: () => number): Game
       const burn = enemy.statuses.find((s) => s.id === 'BURN');
       if (burn && (burn.dps ?? 0) > 0) {
         const amount = (burn.dps ?? 0) * dt;
-        enemy.hp -= amount;
-        totalDamage += amount;
-        if (burn.sourceSlot !== undefined && burn.sourceSlot >= 0) damagePerSlot[burn.sourceSlot] += amount;
-        if (enemy.hp <= 0) {
-          enemy.alive = false;
-          const payout = goldFor(enemy, state, bonuses);
+        const result = applyDamageToEnemy(
+          enemy,
+          amount,
+          goldMultiplier(state.bastionUpgrades) + bonuses.gold,
+        );
+        totalDamage += result.appliedAmount;
+        if (burn.sourceSlot !== undefined && burn.sourceSlot >= 0) damagePerSlot[burn.sourceSlot] += result.appliedAmount;
+        if (result.killed) {
           totalKills += 1;
-          gold += payout;
-          totalGold += payout;
+          gold += result.goldGained;
+          totalGold += result.goldGained;
           if (enemy.isBoss && !defeatedBossFloors.includes(floor)) {
             defeatedBossFloors.push(floor);
           }
-          waveEnemiesRemaining = Math.max(0, waveEnemiesRemaining - 1);
-          floatingTexts.push(createFloatingText(nextTextId++, enemy.x, enemy.y, `+${payout}`, '#ffd700'));
+          floatingTexts.push(createFloatingText(nextTextId++, enemy.x, enemy.y, `+${result.goldGained}`, '#ffd700'));
           continue;
         }
       }
@@ -1082,7 +1229,6 @@ function stepOnce(state: GameState, config: GameConfig, rng: () => number): Game
         leaksThisWave += 1;
         enemy.alive = false;
         enemy.hp = 0;
-        waveEnemiesRemaining = Math.max(0, waveEnemiesRemaining - 1);
         continue;
       }
     } else {
@@ -1115,7 +1261,6 @@ function stepOnce(state: GameState, config: GameConfig, rng: () => number): Game
       if (enemy.isBoss && !defeatedBossFloors.includes(floor)) {
         defeatedBossFloors.push(floor);
       }
-      waveEnemiesRemaining = Math.max(0, waveEnemiesRemaining - 1);
       floatingTexts.push(
         createFloatingText(nextTextId++, enemy.x, enemy.y, `+${outcome.goldGained}`, '#ffd700'),
       );
@@ -1124,7 +1269,9 @@ function stepOnce(state: GameState, config: GameConfig, rng: () => number): Game
 
   // 2. Auto-fire.
   if (currentActive) {
-    for (const p of fireProjectiles(state, currentActive, enemies, rng, bonuses)) projectiles.push(p);
+    for (const p of fireProjectiles(state, currentActive, enemies, rng, bonuses, () => nextTextId++)) {
+      projectiles.push(p);
+    }
   }
 
   // 3. Projectiles move, then resolve hits (damage, kills, splash, pierce/bounce).
@@ -1177,6 +1324,7 @@ function stepOnce(state: GameState, config: GameConfig, rng: () => number): Game
   }
 
   const aliveEnemies = enemies.filter((e) => e.alive);
+  let waveEnemiesRemaining = computeWaveEnemiesRemaining(floorRuntime, aliveEnemies);
 
   // 4. Boss kill-timer.
   const boss = aliveEnemies.find((e) => e.isBoss);
@@ -1221,6 +1369,7 @@ function stepOnce(state: GameState, config: GameConfig, rng: () => number): Game
       ...state,
       phase: 'GAME_OVER',
       floor,
+      floorRuntime,
       enemies: aliveEnemies,
       projectiles: liveProjectiles,
       floatingTexts,
@@ -1235,6 +1384,7 @@ function stepOnce(state: GameState, config: GameConfig, rng: () => number): Game
       awaitingNextWave,
       hotSwapCooldowns,
       team,
+      nextEntityId: nextTextId,
       runStats: {
         ...runStats,
         mvpSlotIndex: mvpSlotOf(damagePerSlot),
@@ -1244,9 +1394,13 @@ function stepOnce(state: GameState, config: GameConfig, rng: () => number): Game
 
   // 6. Wave cleared -> enter the breather (guarded so it triggers once).
   let finalEnemies = aliveEnemies;
+  const isFloorClear =
+    (floorRuntime ? floorRuntime.nextEventIdx >= floorRuntime.plan.events.length : true) &&
+    countAliveFloorEnemies(finalEnemies) === 0 &&
+    waveEnemiesRemaining <= 0;
+
   if (
-    waveEnemiesRemaining <= 0 &&
-    aliveEnemies.length === 0 &&
+    isFloorClear &&
     interWaveTimerSec === undefined &&
     !awaitingNextWave
   ) {
@@ -1261,12 +1415,13 @@ function stepOnce(state: GameState, config: GameConfig, rng: () => number): Game
     if (interWaveTimerSec <= 0) {
       interWaveTimerSec = undefined;
       floor += 1;
-      const waveRng = config.seed !== undefined ? rngFor(config.seed, 'WAVE', floor) : rng;
-      const wave = generateWave(floor, waveRng);
-      finalEnemies = wave;
-      waveEnemiesRemaining = wave.length;
-      bossTimerSec = wave.some((e) => e.isBoss)
-        ? (wave.find((e) => e.isBoss)?.bossTimerSec ?? bossTimerForFloor(floor))
+      const nextFloor = initFloorRuntime(config.seed ?? 1, floor, nextTextId);
+      finalEnemies = nextFloor.initialEnemies;
+      floorRuntime = nextFloor.floorRuntime;
+      waveEnemiesRemaining = computeWaveEnemiesRemaining(floorRuntime, finalEnemies);
+      nextTextId = nextFloor.nextId;
+      bossTimerSec = finalEnemies.some((e) => e.isBoss)
+        ? (finalEnemies.find((e) => e.isBoss)?.bossTimerSec ?? bossTimerForFloor(floor))
         : undefined;
       runStats.floorReached = Math.max(runStats.floorReached, floor);
     }
@@ -1275,6 +1430,7 @@ function stepOnce(state: GameState, config: GameConfig, rng: () => number): Game
   return {
     ...state,
     floor,
+    floorRuntime,
     enemies: finalEnemies,
     projectiles: liveProjectiles,
     floatingTexts,
@@ -1289,6 +1445,7 @@ function stepOnce(state: GameState, config: GameConfig, rng: () => number): Game
     awaitingNextWave,
     hotSwapCooldowns,
     team,
+    nextEntityId: nextTextId,
     runStats,
   };
 }
@@ -1324,6 +1481,10 @@ export function tickGame(
 ): GameState {
   let next = applyInput(state, input, config, rng);
   if (next.phase !== 'PLAYING') return next;
+
+  if (next.nextEntityId === undefined) {
+    next = { ...next, nextEntityId: resolveNextEntityId(next) };
+  }
 
   const steps = Math.min(Math.floor(deltaMs / FIXED_STEP_MS), MAX_STEPS_PER_TICK);
   for (let i = 0; i < steps && next.phase === 'PLAYING'; i++) {

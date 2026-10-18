@@ -25,10 +25,13 @@ export function mulberry32(seed: number): () => number {
   };
 }
 
-/** Mix (seed, channel, floor) into a well-dispersed 32-bit integer seed. */
-export function deriveSeed(seed: number, channel: RngChannel, floor = 0): number {
+/** Mix (seed, channel, floor, salt) into a well-dispersed 32-bit integer seed. */
+export function deriveSeed(seed: number, channel: RngChannel, floor = 0, salt = 0): number {
   let h = (seed ^ CHANNEL_SALT[channel]) | 0;
   h = Math.imul(h ^ (floor * 0x27d4eb2d), 0x85ebca6b);
+  if (salt !== 0) {
+    h = Math.imul(h ^ Math.imul(salt | 0, 0x165667b1), 0x27d4eb2d);
+  }
   h ^= h >>> 13;
   h = Math.imul(h, 0xc2b2ae35);
   h ^= h >>> 16;
@@ -36,8 +39,9 @@ export function deriveSeed(seed: number, channel: RngChannel, floor = 0): number
 }
 
 /**
- * Create an isolated deterministic PRNG stream for `(seed, channel, floor)`.
+ * Create an isolated deterministic PRNG stream for `(seed, channel, floor, salt)`.
  */
-export function rngFor(seed: number, channel: RngChannel, floor = 0): () => number {
-  return mulberry32(deriveSeed(seed, channel, floor));
+export function rngFor(seed: number, channel: RngChannel, floor = 0, salt = 0): () => number {
+  return mulberry32(deriveSeed(seed, channel, floor, salt));
 }
+

@@ -1,0 +1,106 @@
+# Baseline — PokéBastion (2026-10-18)
+Commit base: `HEAD` (previo a WP0–WP7 de `SPEC_SPAWNER_BOSSES.md`)
+
+## 1. `pnpm install && pnpm test`
+```text
+Lockfile is up to date, resolution step is skipped
+Packages: +175
+Done in 1.3s using pnpm v11.15.0
+
+ RUN  v5.0.4 D:/_PROYECTOS/_WEB/poketowerclicker
+
+ ✓ src/renderer/fxSprites.test.ts (6 tests) 9ms
+ ✓ src/core/__tests__/phase2Data.test.ts (10 tests) 10ms
+ ✓ src/core/__tests__/gacha.test.ts (9 tests) 22ms
+ ✓ src/core/__tests__/meta.test.ts (21 tests) 11ms
+ ✓ src/core/__tests__/damage.test.ts (11 tests) 5ms
+ ✓ src/ui/store.test.ts (2 tests) 4ms
+ ✓ src/core/__tests__/teamLevel.test.ts (15 tests) 7ms
+ ✓ src/audio/audio.test.ts (14 tests) 8ms
+ ✓ src/core/__tests__/phase2Contract.test.ts (10 tests) 8ms
+ ✓ src/renderer/pixelArt.test.ts (11 tests) 78ms
+ ✓ src/ui/metaStore.test.ts (4 tests) 6ms
+ ✓ src/core/__tests__/enemyStrike.test.ts (5 tests) 7ms
+ ✓ src/core/__tests__/gameLoop.test.ts (32 tests) 25ms
+ ✓ src/core/__tests__/phase2Combat.test.ts (27 tests) 30ms
+ ✓ src/core/__tests__/rng.test.ts (3 tests) 3ms
+ ✓ src/renderer/collisionDetection.test.ts (6 tests) 3ms
+ ✓ src/renderer/enemyDraw.test.ts (3 tests) 16ms
+ ✓ src/ui/boxFilters.test.ts (3 tests) 5ms
+ ✓ src/renderer/backdrop.test.ts (9 tests) 77ms
+
+ Test Files  19 passed (19)
+      Tests  201 passed (201)
+   Duration  940ms
+```
+
+## 2. `pnpm run test:balance`
+```text
+================================================================
+PokéBastion — Simulador de Economía y Curva v2 (pnpm run test:balance)
+================================================================
+
+--- 1) Verificación Criterio D3 / P6: Idle 0-cps con compras baratas ---
+Semilla 1: Piso 3 en 30s | Bajas: 14 | NvEq: 3 | Jefes abatidos: [ninguno] | ¿Vence jefe piso 10?: NO ✗
+Semilla 2: Piso 2 en 19s | Bajas: 10 | NvEq: 2 | Jefes abatidos: [ninguno] | ¿Vence jefe piso 10?: NO ✗
+Semilla 3: Piso 2 en 19s | Bajas: 10 | NvEq: 2 | Jefes abatidos: [ninguno] | ¿Vence jefe piso 10?: NO ✗
+
+[BALANCE NOTE] Ninguna semilla superó al jefe del piso 10 en modo idle puro sin Paradas de Ruta.
+
+--- 2) Simulación con Clics Activos (1.5 y 4 cps) ---
+
+Perfil: 1.5 clics/s (Política ofensiva / focus):
+  Piso alcanzado: 64
+  Tiempo: 389s
+  Bajas totales: 583
+  Oro total ganado: 286073
+  Nivel de equipo alcanzado: 34
+  Jefes derrotados: [10, 20, 30, 40, 50, 60]
+  Bajas por tramo de pisos:
+    Pisos 1–10: 91 bajas
+    Pisos 11–20: 91 bajas
+    Pisos 21–30: 91 bajas
+    Pisos 31–40: 91 bajas
+    Pisos 41–50: 91 bajas
+    Pisos 51–60: 91 bajas
+    Pisos 61–70: 37 bajas
+
+Perfil: 4 clics/s (Política ofensiva / focus):
+  Piso alcanzado: 80
+  Tiempo: 446s
+  Bajas totales: 725
+  Oro total ganado: 1113790
+  Nivel de equipo alcanzado: 42
+  Jefes derrotados: [10, 20, 30, 40, 50, 60, 70]
+  Bajas por tramo de pisos:
+    Pisos 1–10: 91 bajas
+    Pisos 11–20: 91 bajas
+    Pisos 21–30: 91 bajas
+    Pisos 31–40: 91 bajas
+    Pisos 41–50: 91 bajas
+    Pisos 51–60: 91 bajas
+    Pisos 61–70: 90 bajas
+    Pisos 71–80: 89 bajas
+
+--- 3) Proyección de Escalado Curva v2 (Pisos 1–100) ---
+Piso   1: HP base enemigo =       10 | Oro enemigo =      7 | Nv. de Equipo comprable ≈ 1
+Piso  10: HP base enemigo =       20 | Oro enemigo =     31 | Nv. de Equipo comprable ≈ 12
+Piso  20: HP base enemigo =       47 | Oro enemigo =     71 | Nv. de Equipo comprable ≈ 19
+Piso  50: HP base enemigo =      544 | Oro enemigo =    683 | Nv. de Equipo comprable ≈ 31
+Piso 100: HP base enemigo =   32.176 | Oro enemigo = 75.180 | Nv. de Equipo comprable ≈ 53
+
+================================================================
+¡Simulación de balance completada con éxito!
+================================================================
+```
+
+## 3. `scripts/bench-core.ts`
+```text
+N enemigos | ms/step | % de un frame (16.7 ms) | proyectiles | textos
+        10 |   0.014 |                    0.1% |          10 | 5
+        50 |   0.012 |                    0.1% |           0 | 20
+       100 |   0.013 |                    0.1% |           0 | 5
+       200 |   0.025 |                    0.2% |           5 | 10
+       400 |   0.074 |                    0.4% |           0 | 5
+       800 |   0.138 |                    0.8% |           5 | 10
+```

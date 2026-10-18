@@ -47,4 +47,43 @@ describe('RNG — Mulberry32 & deterministic channel separation (PRD §9.1.1)', 
 
     expect(waveSeq2).toEqual(waveSeq1);
   });
+
+  it('salt = 0 preserves backward compatibility, and salts 1, 2, 3 produce distinct sequences', () => {
+    const seed = 12345;
+    const floor = 5;
+
+    // salt = 0 preserves exact value without salt
+    expect(deriveSeed(seed, 'WAVE', floor)).toBe(deriveSeed(seed, 'WAVE', floor, 0));
+
+    const rngDefault = rngFor(seed, 'WAVE', floor);
+    const rngSalt0 = rngFor(seed, 'WAVE', floor, 0);
+    const seqDefault = [rngDefault(), rngDefault(), rngDefault()];
+    const seqSalt0 = [rngSalt0(), rngSalt0(), rngSalt0()];
+    expect(seqSalt0).toEqual(seqDefault);
+
+    // salt = 1, 2, 3 produce distinct seeds and sequences
+    const seed0 = deriveSeed(seed, 'WAVE', floor, 0);
+    const seed1 = deriveSeed(seed, 'WAVE', floor, 1);
+    const seed2 = deriveSeed(seed, 'WAVE', floor, 2);
+    const seed3 = deriveSeed(seed, 'WAVE', floor, 3);
+
+    const uniqueSeeds = new Set([seed0, seed1, seed2, seed3]);
+    expect(uniqueSeeds.size).toBe(4);
+
+    const r1 = rngFor(seed, 'WAVE', floor, 1);
+    const r2 = rngFor(seed, 'WAVE', floor, 2);
+    const r3 = rngFor(seed, 'WAVE', floor, 3);
+
+    const seq1 = [r1(), r1(), r1()];
+    const seq2 = [r2(), r2(), r2()];
+    const seq3 = [r3(), r3(), r3()];
+
+    expect(seq1).not.toEqual(seqDefault);
+    expect(seq2).not.toEqual(seqDefault);
+    expect(seq3).not.toEqual(seqDefault);
+    expect(seq1).not.toEqual(seq2);
+    expect(seq2).not.toEqual(seq3);
+    expect(seq1).not.toEqual(seq3);
+  });
 });
+

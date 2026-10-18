@@ -4,25 +4,25 @@
  * decision is drawn from the injected `rng` (() => number in [0,1)).
  */
 
-import type { Enemy, EnemyKind } from './types';
+import type { Enemy, SpawnTier } from './types';
 import { ARENA } from '../config/arena.config';
 import {
   BIG_BOSS_FLOORS,
-  BOSS_HP_MULTIPLIER,
   MINIBOSS_INTERVAL,
+  TUTORIAL_MAX_FLOOR,
+  TUTORIAL_SPEED_FACTOR,
   WAVE_ENEMY_COUNT_BASE,
+  bossBounty,
+  bossHp,
   bossTimerForFloor,
-  enemyGoldValue,
   enemyHp,
   enemySpeed,
+  goldPerEnemy,
+  isGrandBossFloor,
 } from '../config/balance.config';
 import { biomeAt } from '../data/biomes';
 import { getEnemyDef } from '../data/enemies';
-
-/** Bosses drop this many times a normal enemy's gold. */
-const BOSS_GOLD_MULTIPLIER = BOSS_HP_MULTIPLIER;
-/** Major bosses (floors 50/100) carry twice a mini-boss' HP. */
-const BIG_BOSS_HP_FACTOR = 2;
+import { rngFor } from './rng';
 
 /**
  * Spawn one enemy on the arena perimeter at `angle` (radians) and send it
@@ -34,17 +34,17 @@ export function spawnEnemyAt(
   isBoss: boolean,
   rng: () => number,
   speciesId?: string,
+  tier: SpawnTier = 'normal',
 ): Enemy {
-  const radius = ARENA.CENTER;
+  const radius = ARENA.SPAWN_HALF_EXTENT;
   const x = ARENA.CENTER + Math.cos(angle) * radius;
   const y = ARENA.CENTER + Math.sin(angle) * radius;
-  const isBigBoss = isBoss && BIG_BOSS_FLOORS.includes(floor);
   const biome = biomeAt(floor);
 
   let defId = speciesId;
   if (!defId) {
     if (isBoss) {
-      defId = isBigBoss
+      defId = isGrandBossFloor(floor)
         ? (biome.grandBosses?.[floor] ?? '0150')
         : (biome.miniBosses[floor] ?? '0127');
     } else {
@@ -56,17 +56,38 @@ export function spawnEnemyAt(
   const hpFactor = def.hpFactor ?? 1;
   const speedFactor = def.speedFactor ?? 1;
 
-  const baseHp = enemyHp(floor) * hpFactor;
-  const hp = Math.max(
-    1,
-    Math.floor(baseHp * (isBoss ? BOSS_HP_MULTIPLIER * (isBigBoss ? BIG_BOSS_HP_FACTOR : 1) : 1)),
-  );
+  let speed = enemySpeed(floor) * speedFactor;
+  if (!isBoss && floor <= TUTORIAL_MAX_FLOOR) {
+    speed *= TUTORIAL_SPEED_FACTOR;
+  }
 
-  const kind: EnemyKind = isBoss ? (isBigBoss ? 'grandboss' : 'miniboss') : 'normal';
+  if (isBoss) {
+    const hp = bossHp(floor, hpFactor);
+    return {
+      // Ids are placeholders; the game loop assigns globally-unique ids when it
+      // integrates the wave into the run state.
+      id: 0,
+      x,
+      y,
+      hp,
+      maxHp: hp,
+      alive: true,
+      types: def.types,
+      speed,
+      goldValue: bossBounty(floor),
+      isBoss: true,
+      bossTimerSec: bossTimerForFloor(floor),
+      definitionId: def.id,
+      kind: isGrandBossFloor(floor) ? 'grandboss' : 'miniboss',
+      bossPhase: 1,
+      bossInvulnSec: 0,
+      enraged: false,
+      enrageElapsedSec: 0,
+    };
+  }
 
+  const hp = Math.max(1, Math.floor(enemyHp(floor) * hpFactor));
   return {
-    // Ids are placeholders; the game loop assigns globally-unique ids when it
-    // integrates the wave into the run state.
     id: 0,
     x,
     y,
@@ -74,15 +95,23 @@ export function spawnEnemyAt(
     maxHp: hp,
     alive: true,
     types: def.types,
-    speed: enemySpeed(floor) * speedFactor,
-    goldValue: Math.floor(
-      enemyGoldValue(floor) * (isBoss ? BOSS_GOLD_MULTIPLIER * (isBigBoss ? BIG_BOSS_HP_FACTOR : 1) : 1),
-    ),
-    isBoss,
-    bossTimerSec: isBoss ? bossTimerForFloor(floor) : undefined,
+    speed,
+    goldValue: tier === 'add' ? 0 : goldPerEnemy(floor),
+    isBoss: false,
+    bossTimerSec: undefined,
     definitionId: def.id,
-    kind,
+    kind: tier === 'add' ? 'add' : 'normal',
+    tier,
   };
+}
+
+/**
+ * Deterministically spawn the boss for a given floor.
+ * Uses isolated RNG stream channel 'WAVE', salt 99 to avoid perturbing floor plan stream.
+ */
+export function spawnBossForFloor(seed: number, floor: number): Enemy {
+  const rng = rngFor(seed, 'WAVE', floor, 99);
+  return spawnEnemyAt(rng() * Math.PI * 2, floor, true, rng);
 }
 
 /**
