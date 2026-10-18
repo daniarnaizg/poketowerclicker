@@ -131,3 +131,7 @@ button:disabled, .pk-btn:disabled {
     font-size: 16px !important;
   }
 }
+
+/* Aviso "listo para despertar" / objetivo de reemplazo: pulso suave */
+.pk-ready { animation: pk-pulse 1.1s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) { .pk-ready { animation: none; } }

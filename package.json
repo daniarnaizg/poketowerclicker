@@ -10,8 +10,7 @@
     "test": "vitest run --passWithNoTests",
     "test:balance": "tsx scripts/sim-balance.ts",
     "sim": "tsx docs/analysis/sim-baseline.ts",
-    "sync:pokemon": "tsx scripts/sync-pokemon.ts",
-    "export:decor": "tsx scripts/export-decor.ts"
+    "sync:pokemon": "tsx scripts/sync-pokemon.ts"
   },
   "dependencies": {
     "howler": "^2.2.4",

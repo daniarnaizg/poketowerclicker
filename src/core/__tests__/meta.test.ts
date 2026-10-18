@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   awaken, canAwaken, chooseStarter, createMeta, loadoutSize, loadoutToEntries,
-  nextAwakenCost, pullGacha, sanitizeMeta, setLoadoutSlot, settleRun, bossFloorsClearedBelow,
+  findLineConflict, nextAwakenCost, pullGacha, sanitizeMeta, setLoadoutSlot, setTeam, settleRun, bossFloorsClearedBelow,
 } from '../meta';
 import type { MetaState } from '../meta';
 import {
@@ -188,5 +188,32 @@ describe('sanitizeMeta', () => {
     expect(m.collection['9999']).toBeUndefined();
     expect(m.loadout).toEqual(['0004', null, null, null, null, null]);
     expect(m.clearedBossFloors).toEqual([10, 20]);
+  });
+});
+
+describe('setTeam', () => {
+  const own = (ids: string[]): MetaState => {
+    const m = started();
+    const collection = { ...m.collection };
+    for (const id of ids) collection[id] = { stars: 1, fragments: 0, shinyOwned: false, shinyActive: false };
+    return { ...m, collection };
+  };
+
+  it('packs the team to the front with ids[0] as main', () => {
+    const m = setTeam(own(['0007', '0010']), ['0010', null, '0004', '0007']);
+    expect(m.loadout).toEqual(['0010', '0004', '0007', null, null, null]);
+  });
+
+  it('drops unowned, duplicated and same-line species', () => {
+    const m = setTeam(own(['0005', '0007']), ['0004', '0004', '0150', '0005', '0007']);
+    // 0005 (Charmeleon) shares a line with 0004 (Charmander).
+    expect(m.loadout).toEqual(['0004', '0007', null, null, null, null]);
+  });
+
+  it('returns the same object when nothing changes and reports line conflicts', () => {
+    const base = own(['0007']);
+    expect(setTeam(base, ['0004'])).toBe(base);
+    expect(findLineConflict(['0004'], '0005')).toBe('0004');
+    expect(findLineConflict(['0004'], '0007')).toBeNull();
   });
 });

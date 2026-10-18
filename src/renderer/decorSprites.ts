@@ -1,17 +1,13 @@
 /**
- * PokéBastion — acceso a los sprites decorativos: Spritesheets PNG editables por bioma,
- * con fallback procedural si no están disponibles.
+ * PokéBastion — acceso a los sprites decorativos: Spritesheets PNG editables por bioma.
  *
  * Los spritesheets viven en `public/decor/<bioma>.png` (ver docs/DECOR_SPRITES.md y decor_atlas.json).
- * Se precargan una vez en paralelo (5 imágenes en total en lugar de 51 peticiones individuales);
+ * Se precargan una vez en paralelo (5 imágenes en total);
  * mientras tanto la arena pinta un suelo liso (ver `decorReady`) para evitar saltos visuales.
  */
 
-import { DECOR_CATALOG } from './decorCatalog';
-import type { DecorName } from './decorCatalog';
 import { DECOR_ATLAS } from './decorAtlas';
-import type { DecorFrame, DecorSheetName } from './decorAtlas';
-import { PixelBuffer, blit } from './pixelArt';
+import type { DecorFrame, DecorName, DecorSheetName } from './decorAtlas';
 
 export interface DecorSprite {
   w: number;
@@ -22,9 +18,8 @@ export interface DecorSprite {
 
 const PRELOAD_TIMEOUT_MS = 4000;
 const sheetImages = new Map<DecorSheetName, HTMLImageElement>();
-const procedural = new Map<string, PixelBuffer>();
 let loading: Promise<void> | null = null;
-let ready = typeof Image === 'undefined'; // entornos sin DOM (tests): solo procedural
+let ready = typeof Image === 'undefined'; // entornos sin DOM (tests)
 let activeFrames: Record<string, DecorFrame> = { ...DECOR_ATLAS.frames };
 
 export function decorBaseUrl(): string {
@@ -82,39 +77,43 @@ export function decorReady(): boolean {
   return ready;
 }
 
-/** Sprite listo para dibujar: extraído de la spritesheet PNG correspondiente o builder procedural. */
+export function __setSheetImageForTesting(sheet: DecorSheetName, img: HTMLImageElement | null): void {
+  if (img) {
+    sheetImages.set(sheet, img);
+  } else {
+    sheetImages.delete(sheet);
+  }
+}
+
+/** Sprite listo para dibujar: extraído de la spritesheet PNG correspondiente. */
 export function getDecorSprite(name: DecorName): DecorSprite {
-  const frame: DecorFrame | undefined = activeFrames[name] ?? DECOR_ATLAS.frames[name];
-  if (frame) {
-    const img = sheetImages.get(frame.sheet);
-    if (img) {
-      const { x: sx, y: sy, w, h } = frame;
-      return {
-        w,
-        h,
-        draw(ctx, x, y, flip = false) {
-          const ix = Math.round(x);
-          const iy = Math.round(y);
-          if (!flip) {
-            ctx.drawImage(img, sx, sy, w, h, ix, iy, w, h);
-            return;
-          }
-          ctx.save();
-          ctx.translate(ix + w, iy);
-          ctx.scale(-1, 1);
-          ctx.drawImage(img, sx, sy, w, h, 0, 0, w, h);
-          ctx.restore();
-        },
-      };
-    }
+  const frame: DecorFrame | undefined = activeFrames[name] ?? (DECOR_ATLAS.frames as Record<string, DecorFrame>)[name];
+  if (!frame) {
+    return {
+      w: 0,
+      h: 0,
+      draw: () => {},
+    };
   }
 
-  // Fallback procedural
-  let buf = procedural.get(name);
-  if (!buf) {
-    buf = DECOR_CATALOG[name]();
-    procedural.set(name, buf);
-  }
-  const b = buf;
-  return { w: b.w, h: b.h, draw: (ctx, x, y, flip = false) => blit(ctx, b, x, y, flip) };
+  const { sheet, x: sx, y: sy, w, h } = frame;
+  return {
+    w,
+    h,
+    draw(ctx, x, y, flip = false) {
+      const img = sheetImages.get(sheet);
+      if (!img) return; // Si aún no ha cargado la imagen o entorno sin DOM (tests), no-op seguro
+      const ix = Math.round(x);
+      const iy = Math.round(y);
+      if (!flip) {
+        ctx.drawImage(img, sx, sy, w, h, ix, iy, w, h);
+        return;
+      }
+      ctx.save();
+      ctx.translate(ix + w, iy);
+      ctx.scale(-1, 1);
+      ctx.drawImage(img, sx, sy, w, h, 0, 0, w, h);
+      ctx.restore();
+    },
+  };
 }

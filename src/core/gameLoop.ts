@@ -93,6 +93,7 @@ const EFFECT_MAX_AGE: Record<VisualEffect['kind'], number> = {
   NOVA: 0.5,
   FLASH: 0.4,
   RING: 0.45,
+  IMPACT: 0.24,
 };
 
 /** Slot index currently flagged active, or -1 when the team is empty. */
@@ -1142,6 +1143,7 @@ function stepOnce(state: GameState, config: GameConfig, rng: () => number): Game
       if (dx * dx + dy * dy > rr * rr) continue;
 
       strike(enemy, p.damage, p.types, '#ffffff');
+      effects.push(createEffect(nextTextId++, 'IMPACT', p.types[0], enemy.x, enemy.y));
       p.hitIds = [...(p.hitIds ?? []), enemy.id];
 
       // AOE: the explosion also hurts everything near the impact point.

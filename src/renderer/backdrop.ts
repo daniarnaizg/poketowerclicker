@@ -14,7 +14,7 @@
 
 import { ARENA } from '../config/arena.config';
 import type { BiomeDefinition, BiomeId } from '../core/types';
-import type { DecorName } from './decorCatalog';
+import type { DecorName } from './decorAtlas';
 import { getDecorSprite } from './decorSprites';
 import type { DecorSprite } from './decorSprites';
 import { hash2, mix, valueNoise } from './pixelArt';

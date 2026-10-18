@@ -4,8 +4,6 @@
  * Cada bioma tiene su propia hoja PNG en `public/decor/<sheet>.png`.
  */
 
-import type { DecorName } from './decorCatalog';
-
 export type DecorSheetName = 'ruta_verde' | 'cueva_umbria' | 'monte_igneo' | 'costa_ruinas' | 'common';
 
 export interface DecorFrame {
@@ -22,12 +20,7 @@ export interface SheetInfo {
   file: string;
 }
 
-export interface DecorAtlas {
-  sheets: Record<DecorSheetName, SheetInfo>;
-  frames: Record<DecorName, DecorFrame>;
-}
-
-export const DECOR_ATLAS: DecorAtlas = {
+export const DECOR_ATLAS = {
   "sheets": {
     "ruta_verde": {
       "w": 138,
@@ -414,4 +407,11 @@ export const DECOR_ATLAS: DecorAtlas = {
       "h": 98
     }
   }
-};
+} as const;
+
+export type DecorName = keyof typeof DECOR_ATLAS['frames'];
+
+export interface DecorAtlas {
+  sheets: Record<DecorSheetName, SheetInfo>;
+  frames: Record<DecorName, DecorFrame>;
+}

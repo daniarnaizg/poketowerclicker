@@ -23,6 +23,7 @@ import { typeColor, typeLetters } from './typeColors';
 import { animDurationMs, dirRow, drawSprite, getSprite, speciesForEnemy } from './sprites';
 import type { AnimName } from './sprites';
 import { decorReady, preloadDecor } from './decorSprites';
+import { drawImpact, drawProjectile, preloadFx } from './fxSprites';
 import { biomeAt, buildBackdrop } from '../data/biomes';
 import './arena.css';
 
@@ -98,9 +99,9 @@ export function clearBackdropCache(): void {
   backdropCache.clear();
 }
 
-// Los PNG editables de public/decor/ se cargan una vez; hasta entonces se pinta suelo liso
-// para que no haya "salto" visual entre el sprite procedural y el PNG.
+// Los PNG editables de public/decor/ y public/fx/ se cargan una vez.
 void preloadDecor();
+void preloadFx();
 
 export function renderBackground(
   ctx: CanvasRenderingContext2D,
@@ -274,6 +275,8 @@ export function renderEffects(ctx: CanvasRenderingContext2D, effects: readonly V
       ctx.strokeStyle = '#ffffff';
       ctx.lineWidth = (fx.width ?? 30) * 0.35;
       ctx.stroke();
+    } else if (fx.kind === 'IMPACT') {
+      drawImpact(ctx, fx.type, fx.x, fx.y, t);
     } else if (fx.kind === 'FLASH') {
       ctx.globalAlpha = 0.45 * fade;
       ctx.fillStyle = color;
@@ -450,13 +453,11 @@ function drawCrown(ctx: CanvasRenderingContext2D, x: number, y: number): void {
 export function renderProjectiles(
   ctx: CanvasRenderingContext2D,
   projectiles: Projectile[],
+  now: number = performance.now(),
 ): void {
   for (const p of projectiles) {
-    const d = ARENA.PROJECTILE_R * 2;
-    ctx.fillStyle = INK;
-    ctx.fillRect(Math.round(p.x - d / 2) - 2, Math.round(p.y - d / 2) - 2, d + 4, d + 4);
-    ctx.fillStyle = typeColor(p.types[0]);
-    ctx.fillRect(Math.round(p.x - d / 2), Math.round(p.y - d / 2), d, d);
+    const angle = Math.atan2(p.vy, p.vx);
+    drawProjectile(ctx, p.types[0], p.x, p.y, angle, now);
   }
 }
 
@@ -565,7 +566,7 @@ export class ArenaRenderer {
     if ((state.bastionShieldSec ?? 0) > 0) drawShield(ctx, state.bastionShieldSec ?? 0, now);
     const strikes = state.strikes ?? [];
     renderEnemies(ctx, state.enemies, now, strikes, 'back');
-    renderProjectiles(ctx, state.projectiles);
+    renderProjectiles(ctx, state.projectiles, now);
     if (active) renderPokemon(ctx, active, C, C, { now, dx, dy, anim, animMs });
     renderEnemies(ctx, state.enemies, now, strikes, 'front');
     renderEffects(ctx, state.effects ?? []);
