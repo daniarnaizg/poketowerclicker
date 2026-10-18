@@ -1,10 +1,10 @@
-# PRD: PokéBastion — Pokémon Idle Defense & Gacha (v2.5)
+# PRD: PokéBastion — Pokémon Idle Defense & Gacha (v2.6)
 
 Documento de Requisitos de Producto para un juego de defensa e incremento progresivo (*Roguelite Idle Defense*) con mecánicas gacha, rotación táctica elemental en tiempo real, vitalidad individual por Pokémon, paradas de ruta y arena simétrica.
 
 | Atributo | Detalle |
 | --- | --- |
-| **Estado del Documento** | Borrador Consolidado (v2.5) — Fase 1, Fase 2 y fundaciones de Fase 3A completadas (`HEAD 89abb76`) · Rediseño de **Vitalidad Individual y Paradas** integrado (bloques `3A.2-V`, `3A.2-P`, `3A.2-S`) |
+| **Estado del Documento** | Borrador Consolidado (v2.6) — Fase 1, Fase 2 y fundaciones de Fase 3A completadas (`HEAD 89abb76`) · Rediseño de **Vitalidad Individual y Paradas** integrado (bloques `3A.2-V`, `3A.2-P`) · Bloque `3A.5` (Spawner continuo, ritmo de piso y Jefes por fases) pendiente, previo a `3A.2-S` |
 | **Plataforma** | Web App (Desktop & Mobile PWA) — 100% Client-Side Execution |
 | **Tooling & Build** | **Vite** + **pnpm** + **TypeScript** |
 | **UI & Estado** | **Preact** (o React) + **Tailwind CSS** + **Zustand** |
@@ -21,7 +21,7 @@ Documento de Requisitos de Producto para un juego de defensa e incremento progre
 
 Un juego web *Roguelite Idle Defense* con coleccionismo **Gacha** y gestión táctica de equipo. El jugador empieza eligiendo un Pokémon Inicial clásico, forma un escuadrón de **máximo 6 Pokémon por run** y **su propio equipo es la defensa** en una **arena cuadrada simétrica con un único Pokémon activo en pantalla a la vez**.
 
-El jugador alterna en tiempo real (*Hot-Swap*) entre los miembros de su equipo para explotar debilidades elementales, proteger a Pokémon heridos mediante resistencias defensivas y gestionar recursos en **Paradas de Ruta** cada 10 pisos (empezando en el piso 5: 5, 15, 25, 35…) frente a oleadas de enemigos que avanzan en 360°, Mini-Bosses cada 10 pisos y Grandes Bosses en los pisos 50 y 100.
+El jugador alterna en tiempo real (*Hot-Swap*) entre los miembros de su equipo para explotar debilidades elementales, proteger a Pokémon heridos mediante resistencias defensivas y gestionar recursos en **Paradas de Ruta** cada 10 pisos (empezando en el piso 5: 5, 15, 25, 35…) frente a un flujo continuo de enemigos en 360°, Mini-Bosses cada 10 pisos y Grandes Bosses en los pisos 50 y 100.
 
 ### Filosofía de Despliegue (Coste Cero / Bajo Mantenimiento)
 
@@ -98,7 +98,7 @@ Cada especie de la colección cuenta con atributos específicos que escalan con 
   * *Pulso / Cuerpo a Cuerpo:* Ondas expansivas de corto alcance y alto daño.
   * *Cadena / Rebote:* Proyectiles que saltan entre múltiples objetivos.
 * **Tipo Elemental (1 o 2 tipos) y Suelo de Inmunidad Global (`×0.25`):** Multiplicadores de tabla de tipos (`×1.5` Súper Eficaz, `×0.65` No muy eficaz), aplicados tanto al **daño infligido** como al **daño recibido** por el Pokémon activo (§4.4.2). Para evitar *soft-locks*, **no existe daño `×0`**: si *cualquier* par de tipos tiene inmunidad canónica, la efectividad combinada se calcula como `min(producto de los pares no inmunes, 0.25)` (`IMMUNITY_FLOOR = 0.25`).
-* **Habilidad Definitiva (Ultimate):** Movimiento insignia con **enfriamiento en segundos por especie** (30 s en la forma inicial, 26 s en la primera evolución, 22 s en la final; 26 s en especies sin evolución), acelerable con pasivas `ULT_CHARGE`.
+* **Habilidad Definitiva (Ultimate):** Movimiento insignia con **enfriamiento en segundos por especie** (30 s en la forma inicial, 26 s en la primera evolución, 22 s en la final; 26 s en especies sin evolución), acelerable con pasivas `ULT_CHARGE`. *(Nota v2.6: la Definitiva no puede saltar fases de jefe; el daño se recorta al umbral 66% / 33%, D26).*
 * **Nivel de Evolución Canónico:** Umbral de Nivel de Equipo requerido para evolucionar (ej. Lv. 16/36, Lv. 7/10, Lv. 30/55).
 
 ---
@@ -225,11 +225,14 @@ $$\text{maxHp} = \left\lfloor \text{HP\_BASE} \times \text{hpFactor}(\text{espec
 * **Único destinatario (Decisión D7):** Todo el daño enemigo lo recibe exclusivamente el **Pokémon activo**. El banquillo nunca recibe daño.
 * **Efectividad de tipos defensiva (Decisión D8):** El daño recibido utiliza la misma función `getEffectiveness(tipos del enemigo, tipos del activo)` con suelo global `IMMUNITY_FLOOR = 0.25`. Como en el 96% de los cruces súper eficaces de `TYPE_CHART` quien golpea con ventaja también resiste o es neutral a la vuelta (Anexo A.3), el relevo ofensivo correcto refuerza de forma natural la supervivencia.
 * **Daño por Fuga:**
-  * `daño = LEAK_BASE(piso) × getEffectiveness(tipos del enemigo, tipos del activo) × (1 − mitigación)`.
+  * `daño = leakDamage(piso) × getEffectiveness(tipos del enemigo, tipos del activo) × (1 − mitigación)`.
   * Es un valor **absoluto por piso** (no una fracción del `maxHp` del receptor), de modo que el `hpFactor` de la especie y los bonos de `MAX_HP` realmente importen.
-  * **Invariante de calibración:** En torno a **≈7 fugas neutrales** abaten al Pokémon de `hpFactor = 1.0` de ese piso si no recibe curación *(ajustable con el simulador v3)*.
-* **Golpe de Jefe Anclado (Decisión D1 adaptada):**
-  * Cada `BOSS_ANCHOR_TICK_SEC` (1,0 s), el jefe anclado inflige `BOSS_ANCHOR_MAX_HP_FRACTION × maxHp del activo × getEffectiveness(tipos del jefe, tipos del activo) × (1 − mitigación)`.
+  * **Invariante de calibración (D24):** Sustituye el antiguo valor fijo ("≈7 fugas") por una fracción calibrada de la horda total del piso: `leakDamage(f) = maxHpRef(f) / (LEAK_KILL_FRACTION * N(f))` con `LEAK_KILL_FRACTION = 0,30` (el 30% de la horda del piso filtrada neutral abate a un Pokémon de `hpFactor = 1.0` con HP lleno; `maxHpRef(f) = HP_BASE * (1 + (EXPECTED_TEAM_LEVEL(f) - 1) * HP_LEVEL_SCALE)`).
+* **Golpe de Jefe Anclado (Decisión D1 adaptada, D26–D27):**
+  * El daño escala según la **fase del jefe**, reduciendo el intervalo y añadiendo invocación de adds (aplicando siempre `getEffectiveness(tipos del jefe, tipos del activo) × (1 − mitigación)`):
+    * **Fase 1 (100–66% HP):** 5% `maxHp` activo / 1,00 s.
+    * **Fase 2 (66–33% HP):** 7% `maxHp` activo / 0,85 s + 6 adds.
+    * **Fase 3 (33–0% HP):** 9% `maxHp` activo / 0,70 s + 8 adds.
   * Se mantiene como fracción del `maxHp` del receptor (sujeta a efectividad de tipos) porque el jefe actúa como un **reloj de presión táctica**, no como un chequeo de tanqueo puro.
 * **Escudo 3★ de Entrada (`bastionShieldSec` → escudo del activo):** El efecto `SHIELD` del Ataque de Entrada 3★ (y el escudo de relevo de *Hada (2)* / *Acero (4)*) protege al Pokémon activo frente a fugas y golpes de jefe mientras dure.
 * **Descarte de daño sobrante (*Overkill*):** Cuando un golpe reduce el `hp` del Pokémon activo a `0`, el daño sobrante **se descarta** y no se transfiere al Pokémon que entra por relevo forzado.
@@ -246,7 +249,7 @@ $$\text{maxHp} = \left\lfloor \text{HP\_BASE} \times \text{hpFactor}(\text{espec
 * **Regla de Una Acción y Menú Fijo de 3 Servicios (Decisiones D12–D14 confirmadas):**
   * Cada Parada presenta siempre los mismos **3 servicios** (sin RNG de catálogo).
   * El jugador puede comprar **como máximo UN servicio** (o pulsar *Seguir sin comprar*), tras lo cual la Parada se cierra e inicia el piso `f`.
-  * Los precios se expresan en múltiplos del **ingreso base de una oleada normal del piso** $W(\text{piso}) = 10 \times \text{enemyGoldValue}(\text{piso})$ y se pagan con el **mismo oro** de la run:
+  * Los precios se expresan en múltiplos del **ingreso económico base por piso (invariante D23)** $W(\text{piso}) = \text{floorGoldIncome}(f) = 10 \times \text{enemyGoldValue}(f)$, independiente de "10 enemigos" ($\text{oro por enemigo} = W(f) / N(f)$, los adds pagan 0, D23), y se pagan con el **mismo oro** de la run (precios de Parada sin cambio):
 
 | Servicio (`ShopServiceId`) | Efecto | Precio en Oro *(ajustable)* |
 | :--- | :--- | :--- |
@@ -304,12 +307,13 @@ export interface ShopState {
 
 | Tipo de Piso / Evento | Pisos | Características del Encuentro |
 | :--- | :--- | :--- |
-| **Oleada Normal** | Todos excepto múltiplos de 10 | Horda de 10 enemigos salvajes del bioma actual avanzando en 360°. |
+| **Oleada Normal** | Pisos regulares (no múltiplos de 10 ni exigentes) | Flujo continuo de `N(f)` enemigos en ventana `S(f)` (≈60 s, ventana de spawn 40–55 s + cola de limpieza) avanzando en 360°, con tope de vivos simultáneos `ALIVE_CAP = 70`. |
+| **Piso Exigente** | `f % 5 === 4` (no jefe: 4, 9, 14, 19, 24…) | Flujo intensificado previo a Parada o Jefe: `N_hard = 1,4*N`, `S_hard = 1,5*S` (duración ≈75–95 s), ráfagas concentradas con tope `ALIVE_CAP = 70`. |
 | **Parada de Ruta** | **Cada 10 pisos desde el piso 5** (5, 15, 25, 35, 45…) | Pausa táctica a mitad de cada ciclo con Informe de Ruta (incluyendo el jefe del piso `f + 5`) y menú de 1 acción (`HEAL_ONE`, `HEAL_TEAM`, `REVIVE_ONE`, §4.4.4). |
-| **Mini-Boss** | **Cada 10 pisos** (10, 20, 30, 40, 60, 70, 80, 90...) | Jefe de zona con ×10 HP y cronómetro de **30 s**. **Se ancla al perímetro central** al llegar y golpea periódicamente al **Pokémon activo** hasta morir o agotar el tiempo. Otorga oro extra y Sellos Gacha al ser **abatido** por primera vez. |
-| **Gran Boss (Major Boss)** | **Pisos 50 y 100** (y cada 50 pisos en la Torre: 150, 200, 250…) | Jefes principales de hito (cronómetro de **45 s** en piso 50 y **60 s** en piso 100) con cambio de fase elemental y anclaje que exigen rotación táctica activa. |
+| **Mini-Boss** | **Cada 10 pisos** (10, 20, 30, 40, 60, 70, 80, 90...) | Jefe de zona con HP por TTK (`bossHp(f) = BOSS_POOL_FACTOR * N(f) * enemyHp(f)` con `BOSS_POOL_FACTOR = 0.6`), cronómetro de **30 s** con `BOSS_TIMER_MODE` (`'enrage'` por defecto), 3 fases de combate (umbrales 66% y 33%) con recorte de daño, 1,5 s de invulnerabilidad entre fases, invocación de adds (6 en fase 2, 8 en fase 3) y flujo ligero de acompañamiento. Se ancla al perímetro central y golpea al activo según la fase (§4.4.2). Otorga botín y Sellos Gacha al ser **abatido** por primera vez. |
+| **Gran Boss (Major Boss)** | **Pisos 50 y 100** (y cada 50 pisos en la Torre: 150, 200, 250…) | Jefes principales de hito con HP por TTK (`BOSS_POOL_FACTOR = 1.2`), cronómetro de **45 s** (piso 50) y **60 s** (piso 100) con `BOSS_TIMER_MODE` (`'enrage'`), 3 fases con recorte de daño e invulnerabilidad 1,5 s, adds, flujo ligero, anclaje escalado y cambio de fase elemental (§9.5) que exigen rotación táctica activa. |
 
-* **Mecánica de Anclaje de Jefe (Decisión D1 + D7/D8):** Un jefe (Mini-Boss o Gran Boss) **nunca se autodestruye ni cuenta como "fuga" al tocar el centro**. Cuando alcanza `BASTION_DAMAGE_R` (24 px del centro), se detiene en el perímetro y **golpea periódicamente al Pokémon activo** (1 golpe/s equivalente al **6% del HP máximo del activo × efectividad de tipos**, respetando el escudo de 3★ si está activo) mientras el cronómetro de jefe sigue corriendo. Si el golpe debilita al Pokémon activo, se ejecuta el **Relevo Forzado** (D16) y el jefe continúa golpeando al nuevo activo. La única forma de superar un piso de jefe (y de registrar su primera victoria para Sellos en `settleRun`) es **reducir su HP a 0 antes de que todo el equipo caiga debilitado o el reloj llegue a 0**.
+* **Mecánica de Anclaje de Jefe (Decisiones D1, D7/D8, D26–D28):** Un jefe (Mini-Boss o Gran Boss) **nunca se autodestruye ni cuenta como "fuga" al tocar el centro**. Cuando alcanza `BASTION_DAMAGE_R` (24 px del centro), se detiene en el perímetro y **golpea periódicamente al Pokémon activo** con la fracción de vida y cadencia escalada de su fase actual (5% / 1,00 s en Fase 1; 7% / 0,85 s en Fase 2; 9% / 0,70 s en Fase 3, multiplicados por efectividad de tipos y mitigación; ver tabla por fase en §4.4.2) mientras el cronómetro de jefe sigue corriendo. Si el golpe debilita al Pokémon activo, se ejecuta el **Relevo Forzado** (D16) y el jefe continúa golpeando al nuevo activo. El fin del combate se rige por `BOSS_TIMER_MODE`: en `'enrage'` (por defecto), agotar el reloj enfurece al jefe (+50% daño cada 10 s) y la run solo concluye por `teamWiped`; en `'gameover'`, agotar el reloj provoca derrota inmediata. Superar el piso de jefe (y registrar su primera victoria para Sellos en `settleRun`) exige **reducir su HP a 0**.
 * **Respiro entre oleadas:** al limpiar un piso el siguiente no aparece de golpe: hay **2,75 s de respiro** (la carga de Definitiva sigue corriendo; **no existe regeneración de HP**) antes de invocar el nuevo piso (o de abrir la Parada si el siguiente piso cumple `f >= 5 && (f - 5) % 10 === 0`). El jugador puede adelantarlo con el botón *Siguiente Piso* o desactivar el avance automático con el chip *AUTO* para esperar de forma indefinida.
 
 ### 5.2. Modo Campaña / Expedición por Biomas
@@ -396,8 +400,8 @@ export interface ShopState {
   ```
 * **Comprobación Serverless Rápida (<5 ms)**:
   1. **Consistencia de Oro:** Verifica que el oro total ganado coincida matemáticamente con las 7 mejoras compradas, los niveles de equipo, **los servicios adquiridos en Paradas (`shop_log`, cuyos precios máximos están acotados por $W(\text{piso})$ y el escalado $\times 1,25^{\text{revives}}$)** más el saldo final.
-  2. **Umbral Fisiológico de Tiempo:** Comprueba que la duración de la run no sea inferior al tiempo físico mínimo requerido para completar las oleadas declaradas.
-  3. **DPS Sanity Check:** Comprueba que el DPS teórico máximo de ese equipo y mejoras (separando `manual_clicks` y `auto_clicks` según la cota de cadencia de `UP_AUTOCLICK`) pueda eliminar al jefe del `final_floor` dentro de su temporizador. La cota usa los **topes por categoría** del pipeline de modificadores (§9.3.1) y un presupuesto máximo de oro por fugitivos de botín (§9.6).
+  2. **Umbral Fisiológico de Tiempo:** Comprueba que la duración de la run no sea inferior al tiempo físico mínimo requerido: dado que el spawner emite enemigos a lo largo de la ventana temporal `S(f)`, un piso no puede completarse antes de `S(f)` ⇒ cota mínima de duración de run $\ge \sum S(f)$ más los respiros entre oleadas (mejora anti-trampa).
+  3. **DPS Sanity Check:** Comprueba que el DPS teórico máximo de ese equipo y mejoras (separando `manual_clicks` y `auto_clicks` según la cota de cadencia de `UP_AUTOCLICK`) pueda eliminar al jefe del `final_floor` dentro de su temporizador considerando su TTK mínimo y las pausas de invulnerabilidad (1,5 s por cambio de fase) entre las 3 fases del jefe. La cota usa los **topes por categoría** del pipeline de modificadores (§9.3.1) y un presupuesto máximo de oro por fugitivos de botín (§9.6).
   4. **Reconstrucción determinista:** clima, terreno, mutadores, informe de ruta y eventos especiales son funciones puras de `(seed, bioma, piso)` (§9.1.1, §9.3.5); el servidor los recalcula con el mismo código (el menú de Parada es fijo y no consume RNG, D19). El payload añade `mode`, `autoSwap` y `schemaVersion`.
 * La función serverless importa las mismas fórmulas matemáticas de `src/core/damage.ts` garantizando consistencia absoluta sin duplicar código.
 
