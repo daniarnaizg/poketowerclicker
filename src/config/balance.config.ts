@@ -28,7 +28,7 @@ export const IMMUNITY_FLOOR = 0.25;
 /** Boss anchor interval (s) while at the bastion perimeter (Decision D1). */
 export const BOSS_ANCHOR_TICK_SEC = 1.0;
 /** Boss anchor damage per tick as a fraction of bastion max HP (Decision D1). */
-export const BOSS_ANCHOR_MAX_HP_FRACTION = 0.06;
+export const BOSS_ANCHOR_MAX_HP_FRACTION = 0.05;
 
 /** Boss timer duration in seconds by floor (PRD §5.1, Decision D1). */
 export function bossTimerForFloor(floor: number): number {
@@ -47,9 +47,15 @@ export const TYPE_MULTIPLIER_SUPER_EFFECTIVE = 1.5;
 export const TYPE_MULTIPLIER_NOT_EFFECTIVE = 0.65;
 export const TYPE_MULTIPLIER_IMMUNE = 0;
 
-/** Enemies per normal wave (PRD §5.1). */
+/**
+ * Enemies per normal wave (PRD §5.1).
+ * @deprecated Kept for temporary compatibility during spawner transition. Use baseFloorEnemyCount / floorEnemyCount.
+ */
 export const WAVE_ENEMY_COUNT_BASE = 10;
-/** Boss HP multiplier vs a normal enemy of the same floor. */
+/**
+ * Boss HP multiplier vs a normal enemy of the same floor.
+ * @deprecated Kept for temporary compatibility during spawner transition. Use bossHp.
+ */
 export const BOSS_HP_MULTIPLIER = 10;
 /** Mini-boss every N floors. */
 export const MINIBOSS_INTERVAL = 10;
@@ -95,9 +101,15 @@ export const HP_BASE = 100;
 export const HP_LEVEL_SCALE = 0.1;
 /** Extra maxHp cushion when the run team has only 1 Pokémon (matches legacy 130 HP bastion) */
 export const SOLO_STARTER_HP_MULT = 1.3;
-/** Base leak damage on Floor 1 before type effectiveness */
+/**
+ * Base leak damage on Floor 1 before type effectiveness.
+ * @deprecated Superseded by D24 leakDamageForFloor formula.
+ */
 export const LEAK_BASE_DAMAGE = 14;
-/** Exponential leak damage growth per floor */
+/**
+ * Exponential leak damage growth per floor.
+ * @deprecated Superseded by D24 leakDamageForFloor formula.
+ */
 export const LEAK_FLOOR_SCALE = 1.05;
 /** Fainted Pokémon contribute 0% of bench passives and type synergies (D9) */
 export const FAINTED_PASSIVE_FACTOR = 0;
@@ -105,11 +117,6 @@ export const FAINTED_PASSIVE_FACTOR = 0;
 export const SHOP_FIRST_FLOOR = 5;
 /** Interval in floors between Route Stops (5, 15, 25, 35...) */
 export const SHOP_EVERY_N_FLOORS = 10;
-
-/** Leak damage dealt by a normal enemy on a given floor before type effectiveness */
-export function leakDamageForFloor(floor: number): number {
-  return Math.max(1, Math.round(LEAK_BASE_DAMAGE * Math.pow(LEAK_FLOOR_SCALE, Math.max(0, floor - 1))));
-}
 
 /** Maps a species canonical base HP (PokeAPI) into the [0.6, 1.8] hpFactor range */
 export function hpFactorForBaseStat(baseHp: number): number {
@@ -177,14 +184,138 @@ export function enemyGoldValue(floor: number): number {
   return Math.floor(5 * Math.pow(1.102, floor - 1) + floor * 2);
 }
 
-/** Normal enemy HP on floor N (Curva v2). */
-export function enemyHp(floor: number): number {
-  return Math.floor(10 * Math.pow(1.085, floor - 1));
-}
-
 /** Normal enemy speed px/s (slight floor scaling, capped). */
 export function enemySpeed(floor: number): number {
   return Math.min(60, 20 + floor * 0.5);
+}
+
+// --- Spawner & Floor Rhythm (D20–D22, §2.1) ---
+export const ALIVE_CAP = 70;
+export const TUTORIAL_MAX_FLOOR = 3;
+export const TUTORIAL_SPEED_FACTOR = 0.8;
+export const HARD_FLOOR_ENEMY_MULT = 1.4;
+export const HARD_FLOOR_WINDOW_MULT = 1.5;
+export const BOSS_TRICKLE_ENABLED = true;
+export const BOSS_TRICKLE_COUNT_FACTOR = 0.4;
+export const BOSS_TRICKLE_GOLD_FACTOR = 0.15;
+export const SPAWN_TIME_EXPONENT = 0.85;
+export const GOLDEN_ANGLE_RAD = Math.PI * (3 - Math.sqrt(5));
+export const SPAWN_ANGLE_JITTER_RAD = (15 * Math.PI) / 180;
+
+export function isGrandBossFloor(floor: number): boolean {
+  return floor >= 50 && floor % 50 === 0;
+}
+
+export function isMiniBossFloor(floor: number): boolean {
+  return floor > 0 && floor % MINIBOSS_INTERVAL === 0 && !isGrandBossFloor(floor);
+}
+
+export function isBossFloor(floor: number): boolean {
+  return isGrandBossFloor(floor) || isMiniBossFloor(floor);
+}
+
+export function isHardFloor(floor: number): boolean {
+  return floor > 0 && floor % 5 === 4 && !isBossFloor(floor);
+}
+
+/** Base normal enemy count N(f) = clamp(round(8 + 1.0 * f), 9, 110). */
+export function baseFloorEnemyCount(floor: number): number {
+  const f = Math.max(1, Math.floor(floor));
+  return Math.min(110, Math.max(9, Math.round(8 + 1.0 * f)));
+}
+
+/** Total enemies for floor (normal, hard, or boss trickle). */
+export function floorEnemyCount(floor: number): number {
+  const base = baseFloorEnemyCount(floor);
+  if (isBossFloor(floor)) {
+    return BOSS_TRICKLE_ENABLED ? Math.max(1, Math.round(BOSS_TRICKLE_COUNT_FACTOR * base)) : 0;
+  }
+  if (isHardFloor(floor)) {
+    return Math.round(base * HARD_FLOOR_ENEMY_MULT);
+  }
+  return base;
+}
+
+/** Base spawn window S(f) in seconds. */
+export function baseSpawnWindowSec(floor: number): number {
+  const f = Math.max(1, Math.floor(floor));
+  if (f > 100) {
+    return Math.max(35, 55 - 0.1 * (f - 100));
+  }
+  return Math.min(55, 40 + 0.15 * f);
+}
+
+/** Effective spawn window S(f) for the floor (multiplied by 1.5 on hard floors). */
+export function floorSpawnWindowSec(floor: number): number {
+  const base = baseSpawnWindowSec(floor);
+  if (isHardFloor(floor)) return base * HARD_FLOOR_WINDOW_MULT;
+  return base;
+}
+
+// --- Economy per floor (D23, §3.1) ---
+/** Invariant floor gold income W(f) = 10 * enemyGoldValue(f). */
+export function floorGoldIncome(floor: number): number {
+  return 10 * enemyGoldValue(floor);
+}
+
+/** Gold paid by a single stream enemy on floor `floor` (adds pay 0). */
+export function goldPerEnemy(floor: number): number {
+  const n = floorEnemyCount(floor);
+  if (n <= 0) return 0;
+  const w = floorGoldIncome(floor);
+  if (isBossFloor(floor)) {
+    return Math.max(1, Math.round((w * BOSS_TRICKLE_GOLD_FACTOR) / n));
+  }
+  return Math.max(1, Math.round(w / n));
+}
+
+/** Boss bounty: 1.0 * W(f) for mini-boss, 2.0 * W(f) for grand boss. */
+export function bossBounty(floor: number): number {
+  const w = floorGoldIncome(floor);
+  return isGrandBossFloor(floor) ? Math.round(2.0 * w) : Math.round(1.0 * w);
+}
+
+// --- Enemy HP & Leaks (D24, §3.2–§3.3) ---
+export const ENEMY_HP_BASE = 140;
+export const ENEMY_HP_FLOOR_GROWTH = 1.075;
+
+export function enemyHp(floor: number): number {
+  return Math.max(1, Math.floor(ENEMY_HP_BASE * Math.pow(ENEMY_HP_FLOOR_GROWTH, Math.max(0, floor - 1))));
+}
+
+export const LEAK_KILL_FRACTION = 0.30;
+
+export function expectedTeamLevel(floor: number): number {
+  const f = Math.max(1, floor);
+  return Math.max(1, Math.round(1 + 0.52 * (f - 1)));
+}
+
+export function maxHpRef(floor: number): number {
+  return HP_BASE * (1 + (expectedTeamLevel(floor) - 1) * HP_LEVEL_SCALE);
+}
+
+export function leakDamageForFloor(floor: number): number {
+  const n = isBossFloor(floor) ? baseFloorEnemyCount(floor) : floorEnemyCount(floor);
+  return Math.max(1, Math.round(maxHpRef(floor) / (LEAK_KILL_FRACTION * Math.max(1, n))));
+}
+
+// --- Bosses by TTK & Phases (D25–D28, §4.1–§4.6) ---
+export const BOSS_POOL_FACTOR_MINI = 0.6;
+export const BOSS_POOL_FACTOR_GRAND = 1.2;
+export const BOSS_PHASE_THRESHOLDS: readonly [number, number] = [0.66, 0.33];
+export const BOSS_PHASE_INVULN_SEC = 1.5;
+export const BOSS_PHASE_ANCHOR_FRACTION: readonly [number, number, number] = [0.05, 0.07, 0.09];
+export const BOSS_PHASE_ANCHOR_TICK_SEC: readonly [number, number, number] = [1.0, 0.85, 0.70];
+export const BOSS_PHASE_ADDS: readonly [number, number, number] = [0, 6, 8];
+
+export type BossTimerMode = 'gameover' | 'enrage';
+export const BOSS_TIMER_MODE: BossTimerMode = 'enrage';
+export const BOSS_ENRAGE_INTERVAL_SEC = 10;
+export const BOSS_ENRAGE_MULT_PER_STEP = 1.5;
+
+export function bossHp(floor: number, speciesHpFactor = 1): number {
+  const poolFactor = isGrandBossFloor(floor) ? BOSS_POOL_FACTOR_GRAND : BOSS_POOL_FACTOR_MINI;
+  return Math.max(1, Math.floor(poolFactor * baseFloorEnemyCount(floor) * enemyHp(floor) * speciesHpFactor));
 }
 
 // ---------------------------------------------------------------------------
@@ -390,4 +521,43 @@ export const BALANCE = Object.freeze({
   STARTING_SEALS,
   AUTOCLICK_CPS_BY_LEVEL,
   AUTOCLICK_MAX_LEVEL,
+  ALIVE_CAP,
+  TUTORIAL_MAX_FLOOR,
+  TUTORIAL_SPEED_FACTOR,
+  HARD_FLOOR_ENEMY_MULT,
+  HARD_FLOOR_WINDOW_MULT,
+  BOSS_TRICKLE_ENABLED,
+  BOSS_TRICKLE_COUNT_FACTOR,
+  BOSS_TRICKLE_GOLD_FACTOR,
+  SPAWN_TIME_EXPONENT,
+  GOLDEN_ANGLE_RAD,
+  SPAWN_ANGLE_JITTER_RAD,
+  isGrandBossFloor,
+  isMiniBossFloor,
+  isBossFloor,
+  isHardFloor,
+  baseFloorEnemyCount,
+  floorEnemyCount,
+  baseSpawnWindowSec,
+  floorSpawnWindowSec,
+  floorGoldIncome,
+  goldPerEnemy,
+  bossBounty,
+  ENEMY_HP_BASE,
+  ENEMY_HP_FLOOR_GROWTH,
+  enemyHp,
+  LEAK_KILL_FRACTION,
+  expectedTeamLevel,
+  maxHpRef,
+  BOSS_POOL_FACTOR_MINI,
+  BOSS_POOL_FACTOR_GRAND,
+  BOSS_PHASE_THRESHOLDS,
+  BOSS_PHASE_INVULN_SEC,
+  BOSS_PHASE_ANCHOR_FRACTION,
+  BOSS_PHASE_ANCHOR_TICK_SEC,
+  BOSS_PHASE_ADDS,
+  BOSS_TIMER_MODE,
+  BOSS_ENRAGE_INTERVAL_SEC,
+  BOSS_ENRAGE_MULT_PER_STEP,
+  bossHp,
 });
