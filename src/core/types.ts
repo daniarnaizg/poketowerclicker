@@ -112,7 +112,40 @@ export interface PlayerPokemon extends Entity {
   shinyActive?: boolean;
 }
 
-export type EnemyKind = 'normal' | 'miniboss' | 'grandboss' | 'runner' | 'shiny';
+export type EnemyKind = 'normal' | 'add' | 'miniboss' | 'grandboss' | 'runner' | 'shiny';
+
+export type SpawnTier = 'normal' | 'add';
+
+export interface SpawnEvent {
+  index: number;
+  tSec: number;
+  angle: number;
+  defId: string;
+  tier: SpawnTier;
+}
+
+export type FloorKind = 'normal' | 'hard' | 'miniboss' | 'grandboss';
+
+export interface FloorPlan {
+  floor: number;
+  kind: FloorKind;
+  totalEnemies: number;
+  spawnWindowSec: number;
+  events: readonly SpawnEvent[];
+}
+
+export interface FloorRuntime {
+  plan: FloorPlan;
+  nextEventIdx: number;
+  elapsedSec: number;
+}
+
+export interface RouteReport {
+  fromFloor: number;
+  toFloor: number;
+  dominantTypes: PokemonType[];
+  upcomingBoss?: { floor: number; definitionId: string; name: string; types: PokemonType[] };
+}
 
 export interface EnemyDefinition {
   /** Pokedex number as zero-padded string, e.g. "0019". */
@@ -170,6 +203,11 @@ export interface Enemy extends Entity {
   lifetimeSec?: number;
   /** Phase 3B prep: current boss phase index. */
   phaseIndex?: number;
+  tier?: SpawnTier;
+  bossPhase?: 1 | 2 | 3;
+  bossInvulnSec?: number;
+  enraged?: boolean;
+  enrageElapsedSec?: number;
 }
 
 /** Status ailments applied by 3★ Switch-In bonuses and some ultimates. */
@@ -342,6 +380,10 @@ export interface GameState {
   effects?: VisualEffect[];
   /** Short-lived attack records (enemies hitting the bastion) consumed by the renderer. */
   strikes?: EnemyStrike[];
+  floorRuntime?: FloorRuntime;
+  nextEntityId?: number;
+  shop?: unknown;
+  phaseBannerText?: string;
 }
 
 /**
@@ -410,6 +452,7 @@ export interface GameConfig {
   readonly typeChart: TypeChart;
   /** Seed for the deterministic RNG. */
   readonly seed: number;
+  readonly bossTimerMode?: 'gameover' | 'enrage';
 }
 
 export interface GameInput {
