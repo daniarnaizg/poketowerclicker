@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { ARENA } from '../../config/arena.config';
 import {
+  PACK_SPREAD_RAD,
+  PACK_STAGGER_SEC,
   TUTORIAL_SPEED_FACTOR,
   enemySpeed,
   floorEnemyCount,
@@ -10,10 +12,11 @@ import {
   isGrandBossFloor,
   isHardFloor,
   isMiniBossFloor,
+  packSizeForFloor,
 } from '../../config/balance.config';
 import { buildBossAddEvents, buildFloorPlan, previewWave } from '../floorPlan';
 import { rngFor } from '../rng';
-import { PokemonType } from '../types';
+import { PokemonType, type SpawnEvent } from '../types';
 import { spawnBossForFloor, spawnEnemyAt } from '../waveGenerator';
 
 describe('FloorPlan, previewWave y spawnEnemyAt (PRD §5.1, §9.1.2–§9.1.3)', () => {
@@ -62,13 +65,61 @@ describe('FloorPlan, previewWave y spawnEnemyAt (PRD §5.1, §9.1.2–§9.1.3)',
     }
   });
 
-  it('Orden temporal no decreciente (events[i].tSec >= events[i - 1].tSec) y rango 0 <= tSec <= spawnWindowSec', () => {
+  it('En el piso 20 hay paquetes de tamaño packSizeForFloor(20): agrupando eventos con hueco temporal <= PACK_STAGGER_SEC + 1e-3, el tamaño de grupo máximo es k y todos los miembros de un paquete caben en un arco <= k*PACK_SPREAD_RAD', () => {
+    const f = 20;
+    const plan = buildFloorPlan(SEED, f);
+    const k = packSizeForFloor(f);
+
+    const groups: SpawnEvent[][] = [];
+    let currentGroup: SpawnEvent[] = [];
+    for (const ev of plan.events) {
+      if (currentGroup.length === 0) {
+        currentGroup.push(ev);
+      } else {
+        const prev = currentGroup[currentGroup.length - 1];
+        if (ev.tSec - prev.tSec <= PACK_STAGGER_SEC + 1e-3) {
+          currentGroup.push(ev);
+        } else {
+          groups.push(currentGroup);
+          currentGroup = [ev];
+        }
+      }
+    }
+    if (currentGroup.length > 0) {
+      groups.push(currentGroup);
+    }
+
+    expect(groups.length).toBeGreaterThan(0);
+    const maxGroupSize = Math.max(...groups.map((g) => g.length));
+    expect(maxGroupSize).toBe(k);
+
+    const TAU = Math.PI * 2;
+    for (const group of groups) {
+      expect(group.length).toBeLessThanOrEqual(k);
+
+      const refAngle = group[0].angle;
+      const diffs = group.map((ev) => {
+        let diff = (ev.angle - refAngle) % TAU;
+        if (diff > Math.PI) diff -= TAU;
+        if (diff < -Math.PI) diff += TAU;
+        return diff;
+      });
+      const arc = Math.max(...diffs) - Math.min(...diffs);
+      expect(arc).toBeLessThanOrEqual(k * PACK_SPREAD_RAD + 1e-4);
+    }
+  });
+
+  it('Orden temporal no decreciente (events[i].tSec >= events[i - 1].tSec), primer evento tSec === 0 y último tSec <= spawnWindowSec + 1e-4', () => {
     const floorsToTest = [1, 4, 7, 9, 10, 14, 19, 23, 50, 100];
 
     for (const f of floorsToTest) {
       const plan = buildFloorPlan(SEED, f);
       const windowSec = floorSpawnWindowSec(f);
       expect(plan.spawnWindowSec).toBe(windowSec);
+
+      expect(plan.events.length).toBeGreaterThan(0);
+      expect(plan.events[0].tSec).toBe(0);
+      expect(plan.events[plan.events.length - 1].tSec).toBeLessThanOrEqual(windowSec + 1e-4);
 
       for (let i = 0; i < plan.events.length; i++) {
         const ev = plan.events[i];
@@ -82,11 +133,48 @@ describe('FloorPlan, previewWave y spawnEnemyAt (PRD §5.1, §9.1.2–§9.1.3)',
     }
   });
 
-  it('Cobertura angular: para f >= 10, los 6 sectores de 60° (Math.floor(ev.angle / (Math.PI / 3)) % 6) reciben al menos 1 evento', () => {
-    // En pisos normales y exigentes f >= 10 (f = 11, 12, 13, 14, 15, 19, 23, etc.) y pisos de jefe f >= 20,
-    // el conteo de enemigos garantiza cobertura de los 6 sectores de 60°.
-    const representativeFloors = [11, 12, 13, 14, 15, 19, 20, 23, 30, 40, 50, 75, 99];
+  it('El hueco temporal máximo entre paquetes consecutivos en un piso normal f=10 es <= S / 2 (no hay huecos enormes)', () => {
+    for (const f of [10, 11]) {
+      const plan = buildFloorPlan(SEED, f);
+      const S = plan.spawnWindowSec;
 
+      const packs: SpawnEvent[][] = [];
+      let currentPack: SpawnEvent[] = [];
+      for (const ev of plan.events) {
+        if (currentPack.length === 0) {
+          currentPack.push(ev);
+        } else {
+          const prev = currentPack[currentPack.length - 1];
+          if (ev.tSec - prev.tSec <= PACK_STAGGER_SEC + 1e-3) {
+            currentPack.push(ev);
+          } else {
+            packs.push(currentPack);
+            currentPack = [ev];
+          }
+        }
+      }
+      if (currentPack.length > 0) {
+        packs.push(currentPack);
+      }
+
+      expect(packs.length).toBeGreaterThan(1);
+      for (let j = 1; j < packs.length; j++) {
+        const gap = packs[j][0].tSec - packs[j - 1][packs[j - 1].length - 1].tSec;
+        expect(gap).toBeLessThanOrEqual(S / 2);
+      }
+    }
+  });
+
+  it('Cobertura angular: el test de 6 sectores exige 6/6 para f >= 20 y al menos 4/6 para 10 <= f < 20', () => {
+    // Para 10 <= f < 20, al menos 4 de los 6 sectores reciben evento
+    for (let f = 10; f < 20; f++) {
+      const plan = buildFloorPlan(SEED, f);
+      const sectors = new Set(plan.events.map((ev) => Math.floor(ev.angle / (Math.PI / 3)) % 6));
+      expect(sectors.size).toBeGreaterThanOrEqual(4);
+    }
+
+    // Para f >= 20, representativos cubren 6/6
+    const representativeFloors = [20, 23, 30, 40, 50, 75, 99];
     for (const f of representativeFloors) {
       const plan = buildFloorPlan(SEED, f);
       const sectors = new Set(plan.events.map((ev) => Math.floor(ev.angle / (Math.PI / 3)) % 6));
@@ -96,8 +184,8 @@ describe('FloorPlan, previewWave y spawnEnemyAt (PRD §5.1, §9.1.2–§9.1.3)',
       }
     }
 
-    // Cobertura angular consistente en todos los pisos normales 11..100
-    for (let f = 11; f <= 100; f++) {
+    // Cobertura 6/6 consistente en todos los pisos normales f = 20..100
+    for (let f = 20; f <= 100; f++) {
       if (isBossFloor(f)) continue;
       const plan = buildFloorPlan(SEED, f);
       const sectors = new Set(plan.events.map((ev) => Math.floor(ev.angle / (Math.PI / 3)) % 6));
