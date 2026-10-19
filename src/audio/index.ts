@@ -94,11 +94,9 @@ export const audio = {
       if (SILENT_EVENTS.has(ev.type)) continue;
       switch (ev.type) {
         case 'hit': playSfx('hit'); break;
-        case 'kill': playSfx('kill'); break;
         case 'hurt': playSfx('hurt'); break;
         case 'ultimate': playSfx('ultimate'); break;
         case 'swap': playSfx('swap'); break;
-        case 'floor': playSfx('floor'); break;
         case 'boss': playSfx('boss'); break;
         case 'levelUp': playSfx('levelUp'); break;
         case 'buy': playSfx('buy'); break;

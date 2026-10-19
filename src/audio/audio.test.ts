@@ -53,10 +53,12 @@ describe('detectAudioEvents', () => {
     expect(types).toEqual(expect.arrayContaining(['kill', 'hurt', 'floor']));
   });
 
-  it('los RING (clics) no cuentan como definitiva, los BEAM/NOVA sí', () => {
+  it('los RING e IMPACT no cuentan como definitiva, los BEAM/NOVA sí', () => {
     const ring = { id: 1, kind: 'RING', x: 0, y: 0, type: 'Fire', age: 0, maxAge: 1 };
-    const nova = { id: 2, kind: 'NOVA', x: 0, y: 0, type: 'Fire', age: 0, maxAge: 1 };
+    const impact = { id: 2, kind: 'IMPACT', x: 0, y: 0, type: 'Fire', age: 0, maxAge: 1 };
+    const nova = { id: 3, kind: 'NOVA', x: 0, y: 0, type: 'Fire', age: 0, maxAge: 1 };
     expect(detectAudioEvents(state(), state({ effects: [ring] as never })).map((e) => e.type)).not.toContain('ultimate');
+    expect(detectAudioEvents(state(), state({ effects: [impact] as never })).map((e) => e.type)).not.toContain('ultimate');
     expect(detectAudioEvents(state(), state({ effects: [nova] as never })).map((e) => e.type)).toContain('ultimate');
   });
 

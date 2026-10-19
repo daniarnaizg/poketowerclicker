@@ -61,7 +61,9 @@ export function detectAudioEvents(prev: GameState | null, next: GameState): Audi
   if (sumTeamHp(next) < sumTeamHp(prev)) out.push({ type: 'hurt' });
 
   const seen = new Set((prev.effects ?? []).map((fx) => fx.id));
-  if ((next.effects ?? []).some((fx) => !seen.has(fx.id) && fx.kind !== 'RING')) out.push({ type: 'ultimate' });
+  if ((next.effects ?? []).some((fx) => !seen.has(fx.id) && (fx.kind === 'NOVA' || fx.kind === 'BEAM'))) {
+    out.push({ type: 'ultimate' });
+  }
 
   const a0 = activeIndex(prev);
   const a1 = activeIndex(next);

@@ -32,20 +32,16 @@ const C5 = 72, E5 = 76, G5 = 79, C6 = 84, B5 = 83, E6 = 88;
 export const SFX: Record<SfxName, Player> = {
   /** Disparo del clic: toque suave y discreto para evitar fatiga. */
   click(c, d, t, v) {
-    tone(c, d, { wave: 'sine', freq: 520 + v * 60, to: 340, t, dur: 0.02, vol: 0.025 });
+    tone(c, d, { wave: 'triangle', freq: 240 + v * 30, to: 120, t, dur: 0.012, vol: 0.02 });
   },
 
-  /** Impacto de daño a enemigo: sonido muy corto y seco (tap percusivo sin cola ni barrido agudo). */
+  /** Impacto de daño a enemigo: sonido muy corto y seco (tap acústico de 8 ms, sin frecuencias agudas ni ruido). */
   hit(c, d, t, v) {
-    tone(c, d, { wave: 'triangle', freq: 320 + v * 50, to: 140, t, dur: 0.012, vol: 0.035 });
-    noise(c, d, { t, dur: 0.008, vol: 0.02, filter: 'bandpass', f0: 1800, q: 2.5 });
+    tone(c, d, { wave: 'triangle', freq: 180 + v * 20, to: 90, t, dur: 0.008, vol: 0.025 });
   },
 
-  /** Enemigo derrotado: caída de tono tipo "faint" + chasquido. */
-  kill(c, d, t, v) {
-    tone(c, d, { wave: 'square', freq: 520 + v * 120, to: 130, t, dur: 0.14, vol: 0.085 });
-    noise(c, d, { t, dur: 0.11, vol: 0.07, filter: 'bandpass', f0: 1900, f1: 380, q: 1.2 });
-  },
+  /** Enemigo derrotado: silenciado por diseño (sin sonido de baja). */
+  kill() {},
 
   /** El Pokémon activo / Bastión recibe daño: golpe grave, perceptible y alarmante. */
   hurt(c, d, t) {
@@ -143,8 +139,8 @@ export const SFX: Record<SfxName, Player> = {
 
 /** Separación mínima entre dos reproducciones del mismo efecto (ms). */
 export const SFX_MIN_GAP_MS: Record<SfxName, number> = {
-  click: 45,
-  hit: 100,
+  click: 50,
+  hit: 120,
   kill: 55,
   hurt: 250,
   ultimate: 300,
