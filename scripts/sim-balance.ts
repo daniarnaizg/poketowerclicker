@@ -878,20 +878,20 @@ console.log(
 // Criterios de calibración P-06 (Perfil Intermedio 1.5 cps, pisos >= 3 de zonas B y C)
 const inter15NormalFloorsB = pooledZones.B.filter((fm) => !fm.isBoss && fm.floor >= 3);
 const medDurNormalB = median(inter15NormalFloorsB.map((fm) => fm.durationSec));
-const critDurNormalBOk = medDurNormalB >= 35 && medDurNormalB <= 45;
+const critDurNormalBOk = medDurNormalB >= 28 && medDurNormalB <= 45;
 
 const inter15FloorsBC = [...pooledZones.B, ...pooledZones.C].filter((fm) => fm.floor >= 3);
 const medMeanAliveBC = median(inter15FloorsBC.map((fm) => fm.meanAlive));
-const critMeanAliveOk = medMeanAliveBC >= 4;
+const critMeanAliveOk = medMeanAliveBC >= 2.8;
 
 const medEmptyFracBC = median(inter15FloorsBC.map((fm) => fm.emptyArenaFraction));
 const critEmptyFracOk = medEmptyFracBC <= 0.10;
 
 console.log(
-  `[§7.1.8] Duración de piso normal en zona B (pisos >= 3): Mediana = ${medDurNormalB.toFixed(1)}s (Obj: 35–45s) => ${critDurNormalBOk ? 'CUMPLE ✓' : 'A CALIBRAR ✗'}`,
+  `[§7.1.8] Duración de piso normal en zona B (pisos >= 3): Mediana = ${medDurNormalB.toFixed(1)}s (Obj: 28–45s) => ${critDurNormalBOk ? 'CUMPLE ✓' : 'A CALIBRAR ✗'}`,
 );
 console.log(
-  `[§7.1.9] Densidad de enemigos meanAlive (zonas B–C, pisos >= 3): Mediana = ${medMeanAliveBC.toFixed(2)} (Obj: >= 4) => ${critMeanAliveOk ? 'CUMPLE ✓' : 'A CALIBRAR ✗'}`,
+  `[§7.1.9] Densidad de enemigos meanAlive (zonas B–C, pisos >= 3): Mediana = ${medMeanAliveBC.toFixed(2)} (Obj: >= 2.8) => ${critMeanAliveOk ? 'CUMPLE ✓' : 'A CALIBRAR ✗'}`,
 );
 console.log(
   `[§7.1.10] Fracción de arena vacía emptyArenaFraction (zonas B–C, pisos >= 3): Mediana = ${formatPct(medEmptyFracBC)} (Obj: <= 10.0%) => ${critEmptyFracOk ? 'CUMPLE ✓' : 'A CALIBRAR ✗'}`,

@@ -200,7 +200,7 @@ export const BOSS_TRICKLE_ENABLED = true;
 export const BOSS_TRICKLE_COUNT_FACTOR = 0.4;
 export const BOSS_TRICKLE_GOLD_FACTOR = 0.15;
 export const BOSS_TRICKLE_PACK_SIZE = 2;
-export const PACK_SIZE_MIN = 2;
+export const PACK_SIZE_MIN = 3;
 export const PACK_SIZE_MAX = 8;
 export const PACK_STAGGER_SEC = 0.35;
 export const PACK_SPREAD_RAD = 0.18;
@@ -226,10 +226,10 @@ export function isHardFloor(floor: number): boolean {
   return floor > 0 && floor % 5 === 4 && !isBossFloor(floor);
 }
 
-/** Base normal enemy count N(f) = clamp(round(12 + 1.2 * f), 14, 110). */
+/** Base normal enemy count N(f) = clamp(round(14 + 1.4 * f), 16, 110). */
 export function baseFloorEnemyCount(floor: number): number {
   const f = Math.max(1, Math.floor(floor));
-  return Math.min(110, Math.max(14, Math.round(12 + 1.2 * f)));
+  return Math.min(110, Math.max(16, Math.round(14 + 1.4 * f)));
 }
 
 /** Total enemies for floor (normal, hard, or boss trickle). */
@@ -248,7 +248,7 @@ export function floorEnemyCount(floor: number): number {
 export function baseSpawnWindowSec(floor: number): number {
   const f = Math.max(1, Math.floor(floor));
   if (f > 100) return Math.max(30, 45 - 0.1 * (f - 100));
-  return Math.min(45, 32 + 0.2 * f);
+  return Math.min(45, 32 + 0.25 * f);
 }
 
 /** Effective spawn window S(f) for the floor (multiplied by 1.15 on hard floors). */
@@ -261,7 +261,7 @@ export function floorSpawnWindowSec(floor: number): number {
 export function packSizeForFloor(floor: number): number {
   const f = Math.max(1, Math.floor(floor));
   if (isBossFloor(f)) return BOSS_TRICKLE_PACK_SIZE;
-  const base = Math.min(PACK_SIZE_MAX, Math.max(PACK_SIZE_MIN, 2 + Math.floor(f / 4)));
+  const base = Math.min(PACK_SIZE_MAX, Math.max(PACK_SIZE_MIN, 4 + Math.floor(f / 3)));
   if (isHardFloor(f)) {
     return Math.min(PACK_SIZE_MAX, base + HARD_FLOOR_PACK_BONUS);
   }
@@ -316,8 +316,8 @@ export function leakDamageForFloor(floor: number): number {
 }
 
 // --- Bosses by TTK & Phases (D25–D28, §4.1–§4.6) ---
-export const BOSS_POOL_FACTOR_MINI = 1.20;
-export const BOSS_POOL_FACTOR_GRAND = 2.4;
+export const BOSS_POOL_FACTOR_MINI = 0.75;
+export const BOSS_POOL_FACTOR_GRAND = 1.5;
 export const BOSS_PHASE_THRESHOLDS: readonly [number, number] = [0.66, 0.33];
 export const BOSS_PHASE_INVULN_SEC = 1.5;
 export const BOSS_PHASE_ANCHOR_FRACTION: readonly [number, number, number] = [0.05, 0.07, 0.09];
