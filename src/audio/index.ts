@@ -4,7 +4,7 @@
 
 import { Sequencer } from './bgm';
 import * as engine from './engine';
-import { detectAudioEvents, sceneFor } from './events';
+import { detectAudioEvents, sceneFor, SILENT_EVENTS } from './events';
 import type { AudioEvent } from './events';
 import { SFX, SFX_MIN_GAP_MS } from './sfx';
 import type { SfxName } from './sfx';
@@ -36,7 +36,7 @@ function applyScene(): void {
 function playSfx(name: SfxName): void {
   const c = engine.getContext();
   const buses = engine.getBuses();
-  if (!c || !buses || engine.getPrefs().muted || c.state !== 'running') return;
+  if (!c || !buses || engine.isSfxMuted() || c.state !== 'running') return;
   const now = performance.now();
   if (now - (lastPlayed.get(name) ?? -1e9) < SFX_MIN_GAP_MS[name]) return;
   lastPlayed.set(name, now);
@@ -63,7 +63,7 @@ export const audio = {
     };
     const onKey = (e: KeyboardEvent): void => {
       onGesture();
-      if (e.code === 'KeyM' && !e.repeat && !e.ctrlKey && !e.metaKey && !e.altKey) engine.toggleMuted();
+      if (e.code === 'KeyM' && !e.repeat && !e.ctrlKey && !e.metaKey && !e.altKey) engine.toggleSfx();
     };
     const onVisibility = (): void => engine.setPageVisible(!document.hidden);
 
@@ -91,12 +91,12 @@ export const audio = {
   observe(prev: GameState | null, next: GameState): void {
     this.setScene(sceneFor(next));
     for (const ev of detectAudioEvents(prev, next)) {
+      if (SILENT_EVENTS.has(ev.type)) continue;
       switch (ev.type) {
-        case 'kill': playSfx('kill'); break;
+        case 'hit': playSfx('hit'); break;
         case 'hurt': playSfx('hurt'); break;
         case 'ultimate': playSfx('ultimate'); break;
         case 'swap': playSfx('swap'); break;
-        case 'floor': playSfx('floor'); break;
         case 'boss': playSfx('boss'); break;
         case 'levelUp': playSfx('levelUp'); break;
         case 'buy': playSfx('buy'); break;
@@ -106,7 +106,34 @@ export const audio = {
     }
   },
 
-  isMuted: () => engine.getPrefs().muted,
-  toggleMute: engine.toggleMuted,
+  isMuted: engine.isMuted,
+  isMusicMuted: engine.isMusicMuted,
+  isSfxMuted: engine.isSfxMuted,
+  toggleMute: () => {
+    engine.unlock();
+    const next = engine.toggleMuted();
+    applyScene();
+    return next;
+  },
+  toggleMusic(): boolean {
+    engine.unlock();
+    const next = engine.toggleMusic();
+    applyScene();
+    return next;
+  },
+  toggleSfx(): boolean {
+    engine.unlock();
+    const next = engine.toggleSfx();
+    if (!next) {
+      playSfx('select');
+    }
+    return next;
+  },
+  setMusicMuted(muted: boolean): void {
+    engine.unlock();
+    engine.setMusicMuted(muted);
+    applyScene();
+  },
+  setSfxMuted: engine.setSfxMuted,
   subscribe: engine.subscribe,
 };

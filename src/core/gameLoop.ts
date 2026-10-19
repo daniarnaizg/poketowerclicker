@@ -41,13 +41,20 @@ import {
   AOE_SPLASH_DAMAGE_FACTOR,
   AOE_SPLASH_RADIUS,
   AOE_SPLASH_STAR_MULTIPLIER,
-  BOSS_ANCHOR_MAX_HP_FRACTION,
-  BOSS_ANCHOR_TICK_SEC,
+  BOSS_ENRAGE_INTERVAL_SEC,
+  BOSS_ENRAGE_MULT_PER_STEP,
+  BOSS_PHASE_ANCHOR_FRACTION,
+  BOSS_PHASE_ANCHOR_TICK_SEC,
+  BOSS_PHASE_INVULN_SEC,
+  BOSS_PHASE_THRESHOLDS,
   BOSS_STATUS_DURATION_FACTOR,
+  BOSS_TIMER_MODE,
   bossTimerForFloor,
   BURN_DPS_FACTOR,
   CHAIN_EXTRA_BOUNCES_AT_MAX_PATTERN,
   FIXED_TIMESTEP,
+  FLOOR_CLOCK_BOOST,
+  FLOOR_CLOCK_BOOST_MAX_ALIVE,
   HOT_SWAP_COOLDOWN,
   INTER_WAVE_BREAK_SEC,
   isBossFloor,
@@ -67,7 +74,7 @@ import {
 } from '../config/balance.config';
 import { calculateDamage, getEffectiveness } from './damage';
 import type { DamageAttacker } from './damage';
-import { buildFloorPlan } from './floorPlan';
+import { buildBossAddEvents, buildFloorPlan } from './floorPlan';
 import { spawnBossForFloor, spawnEnemyAt } from './waveGenerator';
 import { rngFor } from './rng';
 import {
@@ -100,6 +107,9 @@ const EFFECT_MAX_AGE: Record<VisualEffect['kind'], number> = {
   IMPACT: 0.24,
 };
 
+export const MAX_FLOATING_TEXTS = 40;
+export const MAX_IMPACT_EFFECTS = 60;
+
 /** Slot index currently flagged active, or -1 when the team is empty. */
 function activeSlotIndex(state: GameState): number {
   return state.team.findIndex((s) => s.isActive);
@@ -113,6 +123,125 @@ function createFloatingText(
   color: string,
 ): FloatingText {
   return { id, x, y, text, color, age: 0, maxAge: FLOATING_TEXT_MAX_AGE };
+}
+
+export function trimFloatingTexts(floatingTexts: FloatingText[]): void {
+  if (floatingTexts.length > MAX_FLOATING_TEXTS) {
+    floatingTexts.splice(0, floatingTexts.length - MAX_FLOATING_TEXTS);
+  }
+}
+
+export function pushGoldText(
+  floatingTexts: FloatingText[],
+  goldGained: number,
+  enemy: { x: number; y: number },
+  allocId?: (() => number) | number,
+): void;
+export function pushGoldText(
+  floatingTexts: FloatingText[],
+  goldGained: number,
+  x: number,
+  y: number,
+  allocId?: (() => number) | number,
+): void;
+export function pushGoldText(
+  floatingTexts: FloatingText[],
+  goldGained: number,
+  enemyOrX: { x: number; y: number } | number,
+  yOrAllocId?: number | (() => number),
+  maybeAllocId?: (() => number) | number,
+): void {
+  const roundedGold = Math.floor(goldGained);
+  if (roundedGold <= 0) return;
+
+  let x: number;
+  let y: number;
+  let allocId: (() => number) | number | undefined;
+
+  if (typeof enemyOrX === 'object') {
+    x = enemyOrX.x;
+    y = enemyOrX.y;
+    allocId = yOrAllocId as (() => number) | number | undefined;
+  } else {
+    x = enemyOrX;
+    y = yOrAllocId as number;
+    allocId = maybeAllocId;
+  }
+
+  const existing = floatingTexts.find(
+    (t) => t.color === '#ffd700' && t.text.startsWith('+') && t.age <= 0.25,
+  );
+
+  if (existing) {
+    const prev = parseInt(existing.text.slice(1), 10) || 0;
+    existing.text = `+${prev + roundedGold}`;
+    existing.age = 0;
+  } else {
+    const id = typeof allocId === 'function' ? allocId() : (allocId ?? 0);
+    floatingTexts.push(createFloatingText(id, x, y, `+${roundedGold}`, '#ffd700'));
+    trimFloatingTexts(floatingTexts);
+  }
+}
+
+export function pushDamageText(
+  floatingTexts: FloatingText[],
+  amount: number,
+  enemy: { x: number; y: number },
+  color?: string,
+  allocId?: (() => number) | number,
+): void;
+export function pushDamageText(
+  floatingTexts: FloatingText[],
+  amount: number,
+  x: number,
+  y: number,
+  color?: string,
+  allocId?: (() => number) | number,
+): void;
+export function pushDamageText(
+  floatingTexts: FloatingText[],
+  amount: number,
+  enemyOrX: { x: number; y: number } | number,
+  colorOrY?: string | number,
+  allocIdOrColor?: (() => number) | number | string,
+  maybeAllocId?: (() => number) | number,
+): void {
+  const rounded = Math.round(amount);
+  if (rounded < 0) return;
+
+  let x: number;
+  let y: number;
+  let color = '#ffffff';
+  let alloc: (() => number) | number | undefined;
+
+  if (typeof enemyOrX === 'object') {
+    x = enemyOrX.x;
+    y = enemyOrX.y;
+    if (typeof colorOrY === 'string') color = colorOrY;
+    alloc = allocIdOrColor as (() => number) | number | undefined;
+  } else {
+    x = enemyOrX;
+    y = typeof colorOrY === 'number' ? colorOrY : 0;
+    if (typeof allocIdOrColor === 'string') color = allocIdOrColor;
+    alloc = maybeAllocId;
+  }
+
+  const existing = floatingTexts.find((t) => {
+    if (t.age > 0.15) return false;
+    if (!/^\d+$/.test(t.text)) return false;
+    const dx = t.x - x;
+    const dy = t.y - y;
+    return dx * dx + dy * dy < 16 * 16;
+  });
+
+  if (existing) {
+    const prev = parseInt(existing.text, 10) || 0;
+    existing.text = `${prev + rounded}`;
+  } else {
+    const id = typeof alloc === 'function' ? alloc() : (alloc ?? 0);
+    floatingTexts.push(createFloatingText(id, x, y, `${rounded}`, color));
+    trimFloatingTexts(floatingTexts);
+  }
 }
 
 function createEffect(
@@ -245,6 +374,32 @@ function applyDamageToEnemy(
   if (!enemy.alive || rawAmount <= 0) {
     return { appliedAmount: 0, killed: false, goldGained: 0 };
   }
+  if ((enemy.bossInvulnSec ?? 0) > 0) {
+    return { appliedAmount: 0, killed: false, goldGained: 0 };
+  }
+  if (enemy.isBoss) {
+    const phase = enemy.bossPhase ?? 1;
+    if (phase === 1) {
+      const thresholdHp = Math.ceil(enemy.maxHp * BOSS_PHASE_THRESHOLDS[0]);
+      if (enemy.hp - rawAmount <= thresholdHp && thresholdHp > 0) {
+        const appliedAmount = Math.max(0, enemy.hp - thresholdHp);
+        enemy.hp = thresholdHp;
+        enemy.bossPhase = 2;
+        enemy.bossInvulnSec = BOSS_PHASE_INVULN_SEC;
+        return { appliedAmount, killed: false, goldGained: 0, phaseTriggered: 2 };
+      }
+    } else if (phase === 2) {
+      const thresholdHp = Math.ceil(enemy.maxHp * BOSS_PHASE_THRESHOLDS[1]);
+      if (enemy.hp - rawAmount <= thresholdHp && thresholdHp > 0) {
+        const appliedAmount = Math.max(0, enemy.hp - thresholdHp);
+        enemy.hp = thresholdHp;
+        enemy.bossPhase = 3;
+        enemy.bossInvulnSec = BOSS_PHASE_INVULN_SEC;
+        return { appliedAmount, killed: false, goldGained: 0, phaseTriggered: 3 };
+      }
+    }
+  }
+
   const prevHp = enemy.hp;
   enemy.hp = prevHp - rawAmount;
   const appliedAmount = rawAmount;
@@ -262,6 +417,7 @@ interface HitOutcome {
   amount: number;
   killed: boolean;
   goldGained: number;
+  phaseTriggered?: 2 | 3;
 }
 
 /** Apply one damage instance to a (cloned) enemy and report the outcome. */
@@ -288,7 +444,74 @@ function hitEnemy(
     event.amount,
     goldMultiplier(state.bastionUpgrades) + bonuses.gold,
   );
-  return { amount: result.appliedAmount, killed: result.killed, goldGained: result.goldGained };
+  return {
+    amount: result.appliedAmount,
+    killed: result.killed,
+    goldGained: result.goldGained,
+    phaseTriggered: result.phaseTriggered,
+  };
+}
+
+function enqueueBossPhaseAdds(
+  floorRuntime: FloorRuntime | undefined,
+  seed: number,
+  floor: number,
+  phase: 2 | 3,
+): FloorRuntime | undefined {
+  if (!floorRuntime) return floorRuntime;
+  const newEvents = buildBossAddEvents(
+    seed,
+    floor,
+    phase,
+    floorRuntime.elapsedSec,
+    floorRuntime.plan.events.length,
+  );
+  if (newEvents.length === 0) return floorRuntime;
+
+  const pastEvents = floorRuntime.plan.events.slice(0, floorRuntime.nextEventIdx);
+  const futureEvents = floorRuntime.plan.events.slice(floorRuntime.nextEventIdx);
+  const combinedFuture = [...futureEvents, ...newEvents].sort((a, b) => a.tSec - b.tSec);
+  const mergedEvents = [...pastEvents, ...combinedFuture];
+
+  return {
+    ...floorRuntime,
+    plan: {
+      ...floorRuntime.plan,
+      events: mergedEvents,
+      totalEnemies: mergedEvents.length,
+    },
+  };
+}
+
+function cleanupBossAdds(
+  enemies: Enemy[],
+  floorRuntime: FloorRuntime | undefined,
+): FloorRuntime | undefined {
+  for (const e of enemies) {
+    if ((e.tier === 'add' || e.kind === 'add') && e.alive) {
+      e.alive = false;
+      e.hp = 0;
+    }
+  }
+  if (!floorRuntime) return floorRuntime;
+
+  const pastEvents = floorRuntime.plan.events
+    .slice(0, floorRuntime.nextEventIdx)
+    .filter((ev) => ev.tier !== 'add');
+  const futureEvents = floorRuntime.plan.events
+    .slice(floorRuntime.nextEventIdx)
+    .filter((ev) => ev.tier !== 'add');
+  const mergedEvents = [...pastEvents, ...futureEvents];
+
+  return {
+    ...floorRuntime,
+    nextEventIdx: pastEvents.length,
+    plan: {
+      ...floorRuntime.plan,
+      events: mergedEvents,
+      totalEnemies: mergedEvents.length,
+    },
+  };
 }
 
 function aimProjectileAtPoint(p: Projectile, tx: number, ty: number, speed: number): void {
@@ -352,6 +575,34 @@ function createProjectile(
   return createProjectileAtPoint(id, active, target.x, target.y, speed, bounce);
 }
 
+/**
+ * Select the `k <= 5` living enemies nearest to the center in O(E·k),
+ * traversing `living` exactly once.
+ */
+export function selectNearestK(living: readonly Enemy[], k: number): Enemy[] {
+  if (k <= 0 || living.length === 0) return [];
+  const top: { enemy: Enemy; dist: number }[] = [];
+  for (let i = 0; i < living.length; i++) {
+    const enemy = living[i];
+    const dist = dist2ToCenter(enemy);
+    if (top.length < k) {
+      let insertIdx = top.length;
+      while (insertIdx > 0 && top[insertIdx - 1].dist > dist) {
+        insertIdx--;
+      }
+      top.splice(insertIdx, 0, { enemy, dist });
+    } else if (dist < top[top.length - 1].dist) {
+      top.pop();
+      let insertIdx = top.length;
+      while (insertIdx > 0 && top[insertIdx - 1].dist > dist) {
+        insertIdx--;
+      }
+      top.splice(insertIdx, 0, { enemy, dist });
+    }
+  }
+  return top.map((item) => item.enemy);
+}
+
 /** Active Pokémon fires at the nearest enemies according to its SPD + pattern. */
 function fireProjectiles(
   state: GameState,
@@ -361,7 +612,8 @@ function fireProjectiles(
   bonuses: TeamBonuses,
   allocId?: () => number,
 ): Projectile[] {
-  const living = enemies.filter((e) => e.alive);
+  const vulnerable = enemies.filter((e) => e.alive && (e.bossInvulnSec ?? 0) <= 0);
+  const living = vulnerable.length > 0 ? vulnerable : enemies.filter((e) => e.alive);
   if (living.length === 0) return [];
 
   const spdMult = attackSpeedMultiplier(state.bastionUpgrades);
@@ -374,7 +626,7 @@ function fireProjectiles(
   if (shots <= 0) return [];
 
   const multi = projectileCount(state.bastionUpgrades);
-  const targets = [...living].sort((a, b) => dist2ToCenter(a) - dist2ToCenter(b)).slice(0, multi);
+  const targets = selectNearestK(living, multi);
   const speed = PROJECTILE_SPEED[active.pattern];
   const chainBounces =
     multi - 1 + (starsOf(active) >= STAR_PATTERN ? CHAIN_EXTRA_BOUNCES_AT_MAX_PATTERN : 0);
@@ -440,18 +692,23 @@ function applySwitchInBurst(
   defeatedBossFloors: number[],
   floatingTexts: FloatingText[],
   effects: VisualEffect[],
+  floorRuntime?: FloorRuntime,
 ): {
   shield: number;
   damageDelta: number;
   killsDelta: number;
   goldDelta: number;
   nextTextId: number;
+  floorRuntime?: FloorRuntime;
+  phaseBannerText?: string;
 } {
   let shield = currentShield;
   let damageDelta = 0;
   let killsDelta = 0;
   let goldDelta = 0;
   let nextTextId = startTextId;
+  let currentFloorRuntime = floorRuntime;
+  let phaseBannerText: string | undefined;
 
   const bonuses = computeTeamBonuses(team, config.pokedex);
   const attacker = attackerOf(incoming, incoming.types);
@@ -481,17 +738,33 @@ function applySwitchInBurst(
     damageDelta += result.appliedAmount;
     damagePerSlot[slotIndex] += result.appliedAmount;
 
+    if (result.phaseTriggered) {
+      currentFloorRuntime = enqueueBossPhaseAdds(currentFloorRuntime, config.seed ?? 1, floor, result.phaseTriggered);
+      floatingTexts.push(createFloatingText(nextTextId++, enemy.x, enemy.y, `¡FASE ${result.phaseTriggered}!`, '#f8a030'));
+      phaseBannerText = `¡FASE ${result.phaseTriggered}!`;
+    }
+
     if (result.killed) {
       killsDelta += 1;
       goldDelta += result.goldGained;
-      if (enemy.isBoss && !defeatedBossFloors.includes(floor)) {
-        defeatedBossFloors.push(floor);
+      if (enemy.isBoss) {
+        if (!defeatedBossFloors.includes(floor)) {
+          defeatedBossFloors.push(floor);
+        }
+        currentFloorRuntime = cleanupBossAdds(enemies, currentFloorRuntime);
       }
     } else {
       caught.push({ enemy, amount: result.appliedAmount });
     }
-    floatingTexts.push(createFloatingText(nextTextId++, enemy.x, enemy.y, `${result.appliedAmount}`, '#ffd166'));
+    pushDamageText(floatingTexts, result.appliedAmount, enemy, '#ffd166', () => nextTextId++);
   }
+
+  if (killsDelta >= 3) {
+    floatingTexts.push(
+      createFloatingText(nextTextId++, ARENA.CENTER, ARENA.CENTER, `x${killsDelta}`, '#ff9f1c'),
+    );
+  }
+  trimFloatingTexts(floatingTexts);
 
   // 3★+: the entry wave also carries a status (or a temporary bastion shield).
   if (starsOf(incoming) >= STAR_SWITCH_IN) {
@@ -518,6 +791,8 @@ function applySwitchInBurst(
     killsDelta,
     goldDelta,
     nextTextId,
+    floorRuntime: currentFloorRuntime,
+    phaseBannerText,
   };
 }
 
@@ -690,6 +965,7 @@ function startRun(
     awaitingNextWave: false,
     autoAdvanceWave: undefined,
     bastionShieldSec: 0,
+    phaseBannerText: undefined,
     effects: [],
     nextEntityId: nextId,
     runStats: {
@@ -719,7 +995,7 @@ function applyHotSwap(
   if (!targetSlot || !targetSlot.pokemon || !targetSlot.pokemon.alive || targetSlot.isActive) return state;
   if (state.hotSwapCooldowns[index] > 0) return state;
 
-  const floorRuntime = syncFloorRuntimeWithManualState(state);
+  let floorRuntime = syncFloorRuntimeWithManualState(state);
 
   const cooldowns = state.hotSwapCooldowns.map((c, i) =>
     i === index ? HOT_SWAP_COOLDOWN : c,
@@ -765,7 +1041,9 @@ function applyHotSwap(
     defeatedBossFloors,
     floatingTexts,
     effects,
+    floorRuntime,
   );
+  floorRuntime = burst.floorRuntime;
 
   const finalEnemies = enemies.filter((e) => e.alive);
   const waveEnemiesRemaining = computeWaveEnemiesRemaining(floorRuntime, finalEnemies);
@@ -774,6 +1052,7 @@ function applyHotSwap(
     ...next,
     enemies: finalEnemies,
     floorRuntime,
+    phaseBannerText: burst.phaseBannerText ?? next.phaseBannerText,
     gold: next.gold + burst.goldDelta,
     waveEnemiesRemaining,
     floatingTexts,
@@ -890,32 +1169,55 @@ function applyUltimate(state: GameState, config: GameConfig, rng: () => number):
     effects.push(createEffect(nextTextId++, 'FLASH', active.types[0], C, C));
   }
 
+  let currentFloorRuntime = floorRuntime;
+  let phaseBannerText = state.phaseBannerText;
+
+  let ultKills = 0;
   for (const enemy of enemies) {
     if (!enemy.alive || !inRange(enemy)) continue;
     const outcome = hitEnemy(enemy, baseDmg, attacker, state, rng, config, bonuses);
     totalDamage += outcome.amount;
     damagePerSlot[slotIndex] += outcome.amount;
-    floatingTexts.push(createFloatingText(nextTextId++, enemy.x, enemy.y, `${outcome.amount}`, '#c084fc'));
+    pushDamageText(floatingTexts, outcome.amount, enemy, '#c084fc', () => nextTextId++);
+
+    if (outcome.phaseTriggered) {
+      currentFloorRuntime = enqueueBossPhaseAdds(currentFloorRuntime, config.seed ?? 1, state.floor, outcome.phaseTriggered);
+      floatingTexts.push(createFloatingText(nextTextId++, enemy.x, enemy.y, `¡FASE ${outcome.phaseTriggered}!`, '#f8a030'));
+      phaseBannerText = `¡FASE ${outcome.phaseTriggered}!`;
+    }
+
     if (outcome.killed) {
+      ultKills += 1;
       totalKills += 1;
       gold += outcome.goldGained;
       totalGold += outcome.goldGained;
-      if (enemy.isBoss && !defeatedBossFloors.includes(state.floor)) {
-        defeatedBossFloors.push(state.floor);
+      if (enemy.isBoss) {
+        if (!defeatedBossFloors.includes(state.floor)) {
+          defeatedBossFloors.push(state.floor);
+        }
+        currentFloorRuntime = cleanupBossAdds(enemies, currentFloorRuntime);
       }
-      floatingTexts.push(createFloatingText(nextTextId++, enemy.x, enemy.y, `+${outcome.goldGained}`, '#ffd700'));
+      pushGoldText(floatingTexts, outcome.goldGained, enemy, () => nextTextId++);
     } else if (ult.status) {
       applyStatus(enemy, ult.status, ULTIMATE_STATUS_DURATION, { sourceDamage: outcome.amount, slot: slotIndex });
     }
   }
 
+  if (ultKills >= 3) {
+    floatingTexts.push(
+      createFloatingText(nextTextId++, ARENA.CENTER, ARENA.CENTER, `x${ultKills}`, '#ff9f1c'),
+    );
+  }
+  trimFloatingTexts(floatingTexts);
+
   const finalEnemies = enemies.filter((e) => e.alive);
-  const waveEnemiesRemaining = computeWaveEnemiesRemaining(floorRuntime, finalEnemies);
+  const waveEnemiesRemaining = computeWaveEnemiesRemaining(currentFloorRuntime, finalEnemies);
 
   return {
     ...state,
     enemies: finalEnemies,
-    floorRuntime,
+    floorRuntime: currentFloorRuntime,
+    phaseBannerText,
     gold,
     waveEnemiesRemaining,
     floatingTexts,
@@ -1009,7 +1311,16 @@ function stepOnce(state: GameState, config: GameConfig, rng: () => number): Game
   if (floorRuntime) {
     const hasInvulnBoss = enemies.some((e) => e.alive && e.isBoss && (e.bossInvulnSec ?? 0) > 0);
     if (!hasInvulnBoss) {
-      floorRuntime = { ...floorRuntime, elapsedSec: floorRuntime.elapsedSec + dt };
+      let nonBossNonAddAlive = 0;
+      for (let i = 0; i < enemies.length; i++) {
+        const e = enemies[i];
+        if (e.alive && !e.isBoss && e.tier !== 'add' && e.kind !== 'add') {
+          nonBossNonAddAlive++;
+        }
+      }
+      const clockMult =
+        nonBossNonAddAlive <= FLOOR_CLOCK_BOOST_MAX_ALIVE ? FLOOR_CLOCK_BOOST : 1;
+      floorRuntime = { ...floorRuntime, elapsedSec: floorRuntime.elapsedSec + dt * clockMult };
       while (
         floorRuntime.nextEventIdx < floorRuntime.plan.events.length &&
         floorRuntime.plan.events[floorRuntime.nextEventIdx].tSec <= floorRuntime.elapsedSec &&
@@ -1045,6 +1356,7 @@ function stepOnce(state: GameState, config: GameConfig, rng: () => number): Game
   };
 
   let bastionShieldSec = state.bastionShieldSec ?? 0;
+  let phaseBannerText = state.phaseBannerText;
   let phase: GamePhase = state.phase;
   let gold = state.gold;
   let totalKills = state.runStats.totalKills;
@@ -1152,7 +1464,12 @@ function stepOnce(state: GameState, config: GameConfig, rng: () => number): Game
         defeatedBossFloors,
         floatingTexts,
         effects,
+        floorRuntime,
       );
+      floorRuntime = burst.floorRuntime;
+      if (burst.phaseBannerText) {
+        phaseBannerText = burst.phaseBannerText;
+      }
       bastionShieldSec = burst.shield;
       totalDamage += burst.damageDelta;
       totalKills += burst.killsDelta;
@@ -1174,6 +1491,12 @@ function stepOnce(state: GameState, config: GameConfig, rng: () => number): Game
   for (const enemy of enemies) {
     if (!enemy.alive) continue;
 
+    if (enemy.isBoss && (enemy.bossInvulnSec ?? 0) > 0) {
+      const remainingInvuln = (enemy.bossInvulnSec ?? 0) - dt;
+      enemy.bossInvulnSec = remainingInvuln <= 1e-6 ? 0 : remainingInvuln;
+      continue;
+    }
+
     let speedFactor = 1;
     if (enemy.statuses) {
       const burn = enemy.statuses.find((s) => s.id === 'BURN');
@@ -1186,14 +1509,23 @@ function stepOnce(state: GameState, config: GameConfig, rng: () => number): Game
         );
         totalDamage += result.appliedAmount;
         if (burn.sourceSlot !== undefined && burn.sourceSlot >= 0) damagePerSlot[burn.sourceSlot] += result.appliedAmount;
+        if (result.phaseTriggered) {
+          floorRuntime = enqueueBossPhaseAdds(floorRuntime, config.seed ?? 1, floor, result.phaseTriggered);
+          floatingTexts.push(createFloatingText(nextTextId++, enemy.x, enemy.y, `¡FASE ${result.phaseTriggered}!`, '#f8a030'));
+          phaseBannerText = `¡FASE ${result.phaseTriggered}!`;
+          continue;
+        }
         if (result.killed) {
           totalKills += 1;
           gold += result.goldGained;
           totalGold += result.goldGained;
-          if (enemy.isBoss && !defeatedBossFloors.includes(floor)) {
-            defeatedBossFloors.push(floor);
+          if (enemy.isBoss) {
+            if (!defeatedBossFloors.includes(floor)) {
+              defeatedBossFloors.push(floor);
+            }
+            floorRuntime = cleanupBossAdds(enemies, floorRuntime);
           }
-          floatingTexts.push(createFloatingText(nextTextId++, enemy.x, enemy.y, `+${result.goldGained}`, '#ffd700'));
+          pushGoldText(floatingTexts, result.goldGained, enemy, () => nextTextId++);
           continue;
         }
       }
@@ -1212,14 +1544,24 @@ function stepOnce(state: GameState, config: GameConfig, rng: () => number): Game
           enemy.x = ARENA.CENTER - (dx / d) * ARENA.BASTION_DAMAGE_R;
           enemy.y = ARENA.CENTER - (dy / d) * ARENA.BASTION_DAMAGE_R;
         }
+        const phaseIdx = Math.min(2, Math.max(0, (enemy.bossPhase ?? 1) - 1));
+        let anchorFraction = BOSS_PHASE_ANCHOR_FRACTION[phaseIdx];
+        const anchorInterval = BOSS_PHASE_ANCHOR_TICK_SEC[phaseIdx];
+        if (enemy.enraged) {
+          anchorFraction *= Math.pow(
+            BOSS_ENRAGE_MULT_PER_STEP,
+            1 + Math.floor((enemy.enrageElapsedSec ?? 0) / BOSS_ENRAGE_INTERVAL_SEC),
+          );
+        }
+
         const cd = (enemy.bossAttackCooldownSec !== undefined ? enemy.bossAttackCooldownSec : 0) - dt;
         if (cd <= 0) {
           recordStrike(enemy);
           const currentActive = team.find((s) => s.isActive && s.pokemon?.alive)?.pokemon;
           if (currentActive) {
-            applyDamageToActive(currentActive.maxHp * BOSS_ANCHOR_MAX_HP_FRACTION, enemy.types, 'boss');
+            applyDamageToActive(currentActive.maxHp * anchorFraction, enemy.types, 'boss');
           }
-          enemy.bossAttackCooldownSec = BOSS_ANCHOR_TICK_SEC;
+          enemy.bossAttackCooldownSec = anchorInterval;
         } else {
           enemy.bossAttackCooldownSec = cd;
         }
@@ -1249,22 +1591,29 @@ function stepOnce(state: GameState, config: GameConfig, rng: () => number): Game
     baseDmg: number,
     types: readonly PokemonType[],
     color: string,
-  ): void => {
+  ): boolean => {
     const outcome = hitEnemy(enemy, baseDmg, attackerOf(currentActive, types), state, rng, config, bonuses);
     totalDamage += outcome.amount;
     if (currentSlotIndex >= 0) damagePerSlot[currentSlotIndex] += outcome.amount;
-    floatingTexts.push(createFloatingText(nextTextId++, enemy.x, enemy.y, `${outcome.amount}`, color));
+    pushDamageText(floatingTexts, outcome.amount, enemy, color, () => nextTextId++);
+    if (outcome.phaseTriggered) {
+      floorRuntime = enqueueBossPhaseAdds(floorRuntime, config.seed ?? 1, floor, outcome.phaseTriggered);
+      floatingTexts.push(createFloatingText(nextTextId++, enemy.x, enemy.y, `¡FASE ${outcome.phaseTriggered}!`, '#f8a030'));
+      phaseBannerText = `¡FASE ${outcome.phaseTriggered}!`;
+    }
     if (outcome.killed) {
       totalKills += 1;
       gold += outcome.goldGained;
       totalGold += outcome.goldGained;
-      if (enemy.isBoss && !defeatedBossFloors.includes(floor)) {
-        defeatedBossFloors.push(floor);
+      if (enemy.isBoss) {
+        if (!defeatedBossFloors.includes(floor)) {
+          defeatedBossFloors.push(floor);
+        }
+        floorRuntime = cleanupBossAdds(enemies, floorRuntime);
       }
-      floatingTexts.push(
-        createFloatingText(nextTextId++, enemy.x, enemy.y, `+${outcome.goldGained}`, '#ffd700'),
-      );
+      pushGoldText(floatingTexts, outcome.goldGained, enemy, () => nextTextId++);
     }
+    return outcome.killed;
   };
 
   // 2. Auto-fire.
@@ -1275,6 +1624,7 @@ function stepOnce(state: GameState, config: GameConfig, rng: () => number): Game
   }
 
   // 3. Projectiles move, then resolve hits (damage, kills, splash, pierce/bounce).
+  let liveImpacts = effects.reduce((count, fx) => count + (fx.kind === 'IMPACT' ? 1 : 0), 0);
   const liveProjectiles: Projectile[] = [];
   for (const p of projectiles) {
     p.x += p.vx * dt;
@@ -1289,9 +1639,16 @@ function stepOnce(state: GameState, config: GameConfig, rng: () => number): Game
       const dy = enemy.y - p.y;
       if (dx * dx + dy * dy > rr * rr) continue;
 
-      strike(enemy, p.damage, p.types, '#ffffff');
-      effects.push(createEffect(nextTextId++, 'IMPACT', p.types[0], enemy.x, enemy.y));
-      p.hitIds = [...(p.hitIds ?? []), enemy.id];
+      let splashKills = 0;
+      if (strike(enemy, p.damage, p.types, '#ffffff')) {
+        splashKills += 1;
+      }
+      if (liveImpacts < MAX_IMPACT_EFFECTS) {
+        effects.push(createEffect(nextTextId++, 'IMPACT', p.types[0], enemy.x, enemy.y));
+        liveImpacts += 1;
+      }
+      if (p.hitIds) p.hitIds.push(enemy.id);
+      else p.hitIds = [enemy.id];
 
       // AOE: the explosion also hurts everything near the impact point.
       if (p.splashRadius) {
@@ -1300,9 +1657,17 @@ function stepOnce(state: GameState, config: GameConfig, rng: () => number): Game
           const sx = other.x - enemy.x;
           const sy = other.y - enemy.y;
           if (sx * sx + sy * sy <= p.splashRadius * p.splashRadius) {
-            strike(other, p.damage * AOE_SPLASH_DAMAGE_FACTOR, p.types, '#ffe0a0');
+            if (strike(other, p.damage * AOE_SPLASH_DAMAGE_FACTOR, p.types, '#ffe0a0')) {
+              splashKills += 1;
+            }
           }
         }
+      }
+
+      if (splashKills >= 3) {
+        floatingTexts.push(
+          createFloatingText(nextTextId++, enemy.x, enemy.y, `x${splashKills}`, '#ff9f1c'),
+        );
       }
 
       if (p.pierce && p.pierce > 0) {
@@ -1328,8 +1693,25 @@ function stepOnce(state: GameState, config: GameConfig, rng: () => number): Game
 
   // 4. Boss kill-timer.
   const boss = aliveEnemies.find((e) => e.isBoss);
-  bossTimerSec = boss ? (bossTimerSec ?? (boss.bossTimerSec ?? bossTimerForFloor(floor))) - dt : undefined;
-  if (boss) boss.bossTimerSec = bossTimerSec;
+  const timerMode = config.bossTimerMode ?? BOSS_TIMER_MODE;
+  if (boss) {
+    if (bossTimerSec === undefined) {
+      bossTimerSec = boss.bossTimerSec ?? bossTimerForFloor(floor);
+    }
+    if ((boss.bossInvulnSec ?? 0) <= 0) {
+      bossTimerSec -= dt;
+      if (bossTimerSec <= 0) {
+        if (timerMode === 'enrage') {
+          bossTimerSec = 0;
+          boss.enraged = true;
+          boss.enrageElapsedSec = (boss.enrageElapsedSec ?? 0) + dt;
+        }
+      }
+    }
+    boss.bossTimerSec = bossTimerSec;
+  } else {
+    bossTimerSec = undefined;
+  }
 
   runStats = {
     ...runStats,
@@ -1343,16 +1725,24 @@ function stepOnce(state: GameState, config: GameConfig, rng: () => number): Game
   };
   team = syncCooldownMirrors(team, hotSwapCooldowns);
   const nextShield = Math.max(0, bastionShieldSec - dt);
+  trimFloatingTexts(floatingTexts);
 
   // 5. Defeat check: all team wiped, or a boss outlived its timer.
+  const bossExpired =
+    timerMode === 'gameover' &&
+    Boolean(boss) &&
+    (boss?.bossInvulnSec ?? 0) <= 0 &&
+    bossTimerSec !== undefined &&
+    bossTimerSec <= 0;
+
   if (
     phase === 'GAME_OVER' ||
     team.every((s) => !s.pokemon || !s.pokemon.alive) ||
-    (boss && bossTimerSec !== undefined && bossTimerSec <= 0)
+    bossExpired
   ) {
     if (phase !== 'GAME_OVER') {
       phase = 'GAME_OVER';
-      if (boss && bossTimerSec !== undefined && bossTimerSec <= 0) {
+      if (bossExpired) {
         runStats = {
           ...runStats,
           defeatCause: 'bossTimerExpired',
@@ -1370,6 +1760,7 @@ function stepOnce(state: GameState, config: GameConfig, rng: () => number): Game
       phase: 'GAME_OVER',
       floor,
       floorRuntime,
+      phaseBannerText,
       enemies: aliveEnemies,
       projectiles: liveProjectiles,
       floatingTexts,
@@ -1415,6 +1806,7 @@ function stepOnce(state: GameState, config: GameConfig, rng: () => number): Game
     if (interWaveTimerSec <= 0) {
       interWaveTimerSec = undefined;
       floor += 1;
+      phaseBannerText = undefined;
       const nextFloor = initFloorRuntime(config.seed ?? 1, floor, nextTextId);
       finalEnemies = nextFloor.initialEnemies;
       floorRuntime = nextFloor.floorRuntime;
@@ -1431,6 +1823,7 @@ function stepOnce(state: GameState, config: GameConfig, rng: () => number): Game
     ...state,
     floor,
     floorRuntime,
+    phaseBannerText,
     enemies: finalEnemies,
     projectiles: liveProjectiles,
     floatingTexts,

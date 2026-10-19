@@ -12,6 +12,8 @@
 
 export interface AudioPrefs {
   muted: boolean;
+  musicMuted?: boolean;
+  sfxMuted?: boolean;
   /** Volumen de la música, 0..1. */
   music: number;
   /** Volumen de los efectos, 0..1. */
@@ -19,7 +21,7 @@ export interface AudioPrefs {
 }
 
 const STORAGE_KEY = 'pokebastion.audio.v1';
-const DEFAULT_PREFS: AudioPrefs = { muted: false, music: 0.55, sfx: 0.8 };
+const DEFAULT_PREFS: AudioPrefs = { muted: false, musicMuted: false, sfxMuted: false, music: 0.55, sfx: 0.8 };
 
 type AudioCtor = typeof AudioContext;
 
@@ -37,8 +39,14 @@ function loadPrefs(): AudioPrefs {
     if (!raw) return { ...DEFAULT_PREFS };
     const p = JSON.parse(raw) as Partial<AudioPrefs>;
     const clamp = (v: unknown, d: number) => (typeof v === 'number' && v >= 0 && v <= 1 ? v : d);
+    // Legacy migration: si p.muted estaba guardado de la versión antigua de botón único,
+    // se limpia para que no bloquee los nuevos controles independientes.
+    const hasSeparate = typeof p.musicMuted === 'boolean' || typeof p.sfxMuted === 'boolean';
+    const legacyMuted = p.muted === true;
     return {
-      muted: p.muted === true,
+      muted: false,
+      musicMuted: hasSeparate ? p.musicMuted === true : legacyMuted,
+      sfxMuted: hasSeparate ? p.sfxMuted === true : legacyMuted,
       music: clamp(p.music, DEFAULT_PREFS.music),
       sfx: clamp(p.sfx, DEFAULT_PREFS.sfx),
     };
@@ -65,8 +73,8 @@ function applyGains(): void {
   if (!ctx || !master || !musicBus || !sfxBus) return;
   const t = ctx.currentTime;
   master.gain.setTargetAtTime(prefs.muted ? 0 : 1, t, 0.03);
-  musicBus.gain.setTargetAtTime(prefs.music * 0.5, t, 0.05);
-  sfxBus.gain.setTargetAtTime(prefs.sfx * 0.9, t, 0.05);
+  musicBus.gain.setTargetAtTime(prefs.musicMuted ? 0 : prefs.music * 0.5, t, 0.05);
+  sfxBus.gain.setTargetAtTime(prefs.sfxMuted ? 0 : prefs.sfx * 0.9, t, 0.05);
 }
 
 /** Crea (una sola vez) el contexto de audio. Llamar desde un gesto del usuario. */
@@ -96,8 +104,8 @@ export function unlock(): boolean {
     master.connect(comp);
     comp.connect(ctx.destination);
     master.gain.value = prefs.muted ? 0 : 1;
-    musicBus.gain.value = prefs.music * 0.5;
-    sfxBus.gain.value = prefs.sfx * 0.9;
+    musicBus.gain.value = prefs.musicMuted || prefs.muted ? 0 : prefs.music * 0.5;
+    sfxBus.gain.value = prefs.sfxMuted || prefs.muted ? 0 : prefs.sfx * 0.9;
   }
   if (ctx.state === 'suspended') void ctx.resume();
   notify();
@@ -120,16 +128,58 @@ export function getPrefs(): Readonly<AudioPrefs> {
   return prefs;
 }
 
-export function setMuted(muted: boolean): void {
-  prefs = { ...prefs, muted };
+export function isMusicMuted(): boolean {
+  return !!prefs.musicMuted;
+}
+
+export function isSfxMuted(): boolean {
+  return !!prefs.sfxMuted;
+}
+
+export function setMusicMuted(muted: boolean): void {
+  prefs = { ...prefs, musicMuted: muted, muted: false };
   savePrefs();
+  unlock();
+  applyGains();
+  notify();
+}
+
+export function toggleMusic(): boolean {
+  const next = !prefs.musicMuted;
+  setMusicMuted(next);
+  return next;
+}
+
+export function setSfxMuted(muted: boolean): void {
+  prefs = { ...prefs, sfxMuted: muted, muted: false };
+  savePrefs();
+  unlock();
+  applyGains();
+  notify();
+}
+
+export function toggleSfx(): boolean {
+  const next = !prefs.sfxMuted;
+  setSfxMuted(next);
+  return next;
+}
+
+export function isMuted(): boolean {
+  return !!(prefs.musicMuted && prefs.sfxMuted);
+}
+
+export function setMuted(muted: boolean): void {
+  prefs = { ...prefs, muted: false, musicMuted: muted, sfxMuted: muted };
+  savePrefs();
+  unlock();
   applyGains();
   notify();
 }
 
 export function toggleMuted(): boolean {
-  setMuted(!prefs.muted);
-  return prefs.muted;
+  const shouldMute = !isMuted();
+  setMuted(shouldMute);
+  return shouldMute;
 }
 
 export function setVolumes(v: Partial<Pick<AudioPrefs, 'music' | 'sfx'>>): void {

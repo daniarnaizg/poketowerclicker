@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { detectAudioEvents, sceneFor } from './events';
+import { detectAudioEvents, sceneFor, SILENT_EVENTS } from './events';
 import { THEMES, noteToMidi, parseMelody } from './themes';
 import type { GameState } from '../core/types';
 
@@ -53,10 +53,12 @@ describe('detectAudioEvents', () => {
     expect(types).toEqual(expect.arrayContaining(['kill', 'hurt', 'floor']));
   });
 
-  it('los RING (clics) no cuentan como definitiva, los BEAM/NOVA sí', () => {
+  it('los RING e IMPACT no cuentan como definitiva, los BEAM/NOVA sí', () => {
     const ring = { id: 1, kind: 'RING', x: 0, y: 0, type: 'Fire', age: 0, maxAge: 1 };
-    const nova = { id: 2, kind: 'NOVA', x: 0, y: 0, type: 'Fire', age: 0, maxAge: 1 };
+    const impact = { id: 2, kind: 'IMPACT', x: 0, y: 0, type: 'Fire', age: 0, maxAge: 1 };
+    const nova = { id: 3, kind: 'NOVA', x: 0, y: 0, type: 'Fire', age: 0, maxAge: 1 };
     expect(detectAudioEvents(state(), state({ effects: [ring] as never })).map((e) => e.type)).not.toContain('ultimate');
+    expect(detectAudioEvents(state(), state({ effects: [impact] as never })).map((e) => e.type)).not.toContain('ultimate');
     expect(detectAudioEvents(state(), state({ effects: [nova] as never })).map((e) => e.type)).toContain('ultimate');
   });
 
@@ -73,6 +75,26 @@ describe('detectAudioEvents', () => {
   it('compra de mejora vs. nivel de equipo', () => {
     expect(detectAudioEvents(state(), state({ bastionUpgrades: { UP_ARROW: 1 } as never })).map((e) => e.type)).toEqual(['buy']);
     expect(detectAudioEvents(state(), state({ teamLevel: 2 })).map((e) => e.type)).toEqual(['levelUp']);
+  });
+
+  it('emite hit cuando totalDamageDealt sube y no cuando no cambia', () => {
+    const s0 = state({ runStats: { totalKills: 0, totalDamageDealt: 100 } as never });
+    const s1 = state({ runStats: { totalKills: 0, totalDamageDealt: 150 } as never });
+    const s2 = state({ runStats: { totalKills: 0, totalDamageDealt: 150 } as never });
+
+    expect(detectAudioEvents(s0, s1).map((e) => e.type)).toContain('hit');
+    expect(detectAudioEvents(s1, s2).map((e) => e.type)).not.toContain('hit');
+    expect(detectAudioEvents(state(), state()).map((e) => e.type)).not.toContain('hit');
+    expect(detectAudioEvents(state(), s0).map((e) => e.type)).toContain('hit');
+  });
+});
+
+describe('SILENT_EVENTS', () => {
+  it('contiene kill y floor y no contiene hurt ni hit', () => {
+    expect(SILENT_EVENTS.has('kill')).toBe(true);
+    expect(SILENT_EVENTS.has('floor')).toBe(true);
+    expect(SILENT_EVENTS.has('hurt')).toBe(false);
+    expect(SILENT_EVENTS.has('hit')).toBe(false);
   });
 });
 
@@ -99,5 +121,26 @@ describe('temas musicales', () => {
     const t = THEMES[id as keyof typeof THEMES];
     expect(parseMelody(t.melody).length).toBeGreaterThan(8);
     expect(t.melody.length % t.chords.length).toBe(0);
+  });
+});
+
+describe('controles independientes de audio (BGM y SFX)', () => {
+  it('permite alternar BGM y SFX de forma independiente', async () => {
+    const { audio } = await import('./index');
+
+    const initialMusic = audio.isMusicMuted();
+    const initialSfx = audio.isSfxMuted();
+
+    expect(audio.toggleMusic()).toBe(!initialMusic);
+    expect(audio.isMusicMuted()).toBe(!initialMusic);
+    expect(audio.isSfxMuted()).toBe(initialSfx); // SFX no cambia al tocar BGM
+
+    expect(audio.toggleSfx()).toBe(!initialSfx);
+    expect(audio.isSfxMuted()).toBe(!initialSfx);
+    expect(audio.isMusicMuted()).toBe(!initialMusic); // BGM no cambia al tocar SFX
+
+    // Restaurar
+    audio.setMusicMuted(initialMusic);
+    audio.setSfxMuted(initialSfx);
   });
 });

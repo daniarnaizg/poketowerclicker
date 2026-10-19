@@ -6,6 +6,8 @@
 import {
   BOSS_PHASE_ADDS,
   GOLDEN_ANGLE_RAD,
+  PACK_SPREAD_RAD,
+  PACK_STAGGER_SEC,
   SPAWN_ANGLE_JITTER_RAD,
   SPAWN_TIME_EXPONENT,
   floorEnemyCount,
@@ -14,6 +16,7 @@ import {
   isGrandBossFloor,
   isHardFloor,
   isMiniBossFloor,
+  packSizeForFloor,
 } from '../config/balance.config';
 import { biomeAt } from '../data/biomes';
 import { getEnemyDef } from '../data/enemies';
@@ -90,61 +93,39 @@ export function buildFloorPlan(seed: number, floor: number): FloorPlan {
   const spawnWindowSec = floorSpawnWindowSec(floor);
   const baseAngle = rng() * TAU;
 
-  const burstCounts = [0, 0, 0];
-  if (kind === 'hard' && totalEnemies > 0) {
-    for (let j = 0; j < totalEnemies; j++) {
-      const b = Math.min(2, Math.floor((j * 3) / totalEnemies));
-      burstCounts[b]++;
-    }
-  }
-  const burstStartIndices = [
-    0,
-    burstCounts[0],
-    burstCounts[0] + burstCounts[1],
-  ];
+  const k = packSizeForFloor(floor);
+  const P = Math.ceil(totalEnemies / k);
 
   const events: SpawnEvent[] = [];
-  let prevTSec = 0;
 
-  for (let i = 0; i < totalEnemies; i++) {
-    let tSec: number;
-    if (kind === 'hard') {
-      const burstIdx = Math.min(2, Math.floor((i * 3) / totalEnemies));
-      const burstStart = burstIdx * (spawnWindowSec / 3);
-      const burstSpan = (spawnWindowSec / 3) * 0.65;
-      const burstStartIdx = burstStartIndices[burstIdx];
-      const localIdx = i - burstStartIdx;
-      const burstCount = Math.max(1, burstCounts[burstIdx]);
-      const localRatio = localIdx === 0 ? 0 : Math.pow(localIdx / burstCount, SPAWN_TIME_EXPONENT);
-      tSec = burstStart + burstSpan * localRatio;
-    } else {
-      tSec = i === 0 ? 0 : spawnWindowSec * Math.pow(i / totalEnemies, SPAWN_TIME_EXPONENT);
-    }
+  for (let j = 0; j < P; j++) {
+    const packT =
+      j === 0
+        ? 0
+        : spawnWindowSec * Math.pow(j / Math.max(1, P - 1), SPAWN_TIME_EXPONENT);
+    const jitterJ = (rng() * 2 - 1) * SPAWN_ANGLE_JITTER_RAD;
+    const packAngle = baseAngle + j * GOLDEN_ANGLE_RAD + jitterJ;
+    const sizeJ = j === P - 1 ? totalEnemies - k * (P - 1) : k;
 
-    tSec = Number(tSec.toFixed(4));
-    if (tSec < prevTSec) {
-      tSec = prevTSec;
-    }
-    if (tSec < 0) {
-      tSec = 0;
-    }
-    if (tSec > spawnWindowSec) {
-      tSec = spawnWindowSec;
-    }
-    tSec = Number(tSec.toFixed(4));
-    prevTSec = tSec;
+    for (let m = 0; m < sizeJ; m++) {
+      const tSec = Number(Math.min(spawnWindowSec, packT + m * PACK_STAGGER_SEC).toFixed(4));
+      const angle =
+        ((packAngle + (m - (sizeJ - 1) / 2) * PACK_SPREAD_RAD) % TAU + TAU) % TAU;
+      const defId = pickWeightedWildSpecies(biome, rng);
 
-    const jitter = (rng() * 2 - 1) * SPAWN_ANGLE_JITTER_RAD;
-    const angle = ((baseAngle + i * GOLDEN_ANGLE_RAD + jitter) % TAU + TAU) % TAU;
-    const defId = pickWeightedWildSpecies(biome, rng);
+      events.push({
+        index: 0,
+        tSec,
+        angle,
+        defId,
+        tier: 'normal',
+      });
+    }
+  }
 
-    events.push({
-      index: i,
-      tSec,
-      angle,
-      defId,
-      tier: 'normal',
-    });
+  events.sort((a, b) => a.tSec - b.tSec);
+  for (let i = 0; i < events.length; i++) {
+    events[i].index = i;
   }
 
   return {

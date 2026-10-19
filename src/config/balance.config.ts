@@ -42,7 +42,7 @@ export const ENEMY_CONTACT_DAMAGE = 4;
 /** Contact damage grows per floor: ENEMY_CONTACT_DAMAGE x (1 + (floor-1) x this). */
 export const ENEMY_CONTACT_DAMAGE_FLOOR_SCALE = 0.01;
 /** Automatic breather (s) between a cleared wave and the next floor spawn. */
-export const INTER_WAVE_BREAK_SEC = 2.75;
+export const INTER_WAVE_BREAK_SEC = 1.5;
 export const TYPE_MULTIPLIER_SUPER_EFFECTIVE = 1.5;
 export const TYPE_MULTIPLIER_NOT_EFFECTIVE = 0.65;
 export const TYPE_MULTIPLIER_IMMUNE = 0;
@@ -194,10 +194,18 @@ export const ALIVE_CAP = 70;
 export const TUTORIAL_MAX_FLOOR = 3;
 export const TUTORIAL_SPEED_FACTOR = 0.8;
 export const HARD_FLOOR_ENEMY_MULT = 1.4;
-export const HARD_FLOOR_WINDOW_MULT = 1.5;
+export const HARD_FLOOR_WINDOW_MULT = 1.15;
+export const HARD_FLOOR_PACK_BONUS = 2;
 export const BOSS_TRICKLE_ENABLED = true;
 export const BOSS_TRICKLE_COUNT_FACTOR = 0.4;
 export const BOSS_TRICKLE_GOLD_FACTOR = 0.15;
+export const BOSS_TRICKLE_PACK_SIZE = 2;
+export const PACK_SIZE_MIN = 3;
+export const PACK_SIZE_MAX = 8;
+export const PACK_STAGGER_SEC = 0.35;
+export const PACK_SPREAD_RAD = 0.18;
+export const FLOOR_CLOCK_BOOST = 2.5;
+export const FLOOR_CLOCK_BOOST_MAX_ALIVE = 1;
 export const SPAWN_TIME_EXPONENT = 0.85;
 export const GOLDEN_ANGLE_RAD = Math.PI * (3 - Math.sqrt(5));
 export const SPAWN_ANGLE_JITTER_RAD = (15 * Math.PI) / 180;
@@ -218,10 +226,10 @@ export function isHardFloor(floor: number): boolean {
   return floor > 0 && floor % 5 === 4 && !isBossFloor(floor);
 }
 
-/** Base normal enemy count N(f) = clamp(round(8 + 1.0 * f), 9, 110). */
+/** Base normal enemy count N(f) = clamp(round(14 + 1.4 * f), 16, 110). */
 export function baseFloorEnemyCount(floor: number): number {
   const f = Math.max(1, Math.floor(floor));
-  return Math.min(110, Math.max(9, Math.round(8 + 1.0 * f)));
+  return Math.min(110, Math.max(16, Math.round(14 + 1.4 * f)));
 }
 
 /** Total enemies for floor (normal, hard, or boss trickle). */
@@ -239,16 +247,24 @@ export function floorEnemyCount(floor: number): number {
 /** Base spawn window S(f) in seconds. */
 export function baseSpawnWindowSec(floor: number): number {
   const f = Math.max(1, Math.floor(floor));
-  if (f > 100) {
-    return Math.max(35, 55 - 0.1 * (f - 100));
-  }
-  return Math.min(55, 40 + 0.15 * f);
+  if (f > 100) return Math.max(30, 45 - 0.1 * (f - 100));
+  return Math.min(45, 32 + 0.25 * f);
 }
 
-/** Effective spawn window S(f) for the floor (multiplied by 1.5 on hard floors). */
+/** Effective spawn window S(f) for the floor (multiplied by 1.15 on hard floors). */
 export function floorSpawnWindowSec(floor: number): number {
   const base = baseSpawnWindowSec(floor);
   if (isHardFloor(floor)) return base * HARD_FLOOR_WINDOW_MULT;
+  return base;
+}
+
+export function packSizeForFloor(floor: number): number {
+  const f = Math.max(1, Math.floor(floor));
+  if (isBossFloor(f)) return BOSS_TRICKLE_PACK_SIZE;
+  const base = Math.min(PACK_SIZE_MAX, Math.max(PACK_SIZE_MIN, 4 + Math.floor(f / 3)));
+  if (isHardFloor(f)) {
+    return Math.min(PACK_SIZE_MAX, base + HARD_FLOOR_PACK_BONUS);
+  }
   return base;
 }
 
@@ -276,8 +292,8 @@ export function bossBounty(floor: number): number {
 }
 
 // --- Enemy HP & Leaks (D24, §3.2–§3.3) ---
-export const ENEMY_HP_BASE = 140;
-export const ENEMY_HP_FLOOR_GROWTH = 1.075;
+export const ENEMY_HP_BASE = 55;
+export const ENEMY_HP_FLOOR_GROWTH = 1.086;
 
 export function enemyHp(floor: number): number {
   return Math.max(1, Math.floor(ENEMY_HP_BASE * Math.pow(ENEMY_HP_FLOOR_GROWTH, Math.max(0, floor - 1))));
@@ -300,8 +316,8 @@ export function leakDamageForFloor(floor: number): number {
 }
 
 // --- Bosses by TTK & Phases (D25–D28, §4.1–§4.6) ---
-export const BOSS_POOL_FACTOR_MINI = 0.6;
-export const BOSS_POOL_FACTOR_GRAND = 1.2;
+export const BOSS_POOL_FACTOR_MINI = 0.75;
+export const BOSS_POOL_FACTOR_GRAND = 1.5;
 export const BOSS_PHASE_THRESHOLDS: readonly [number, number] = [0.66, 0.33];
 export const BOSS_PHASE_INVULN_SEC = 1.5;
 export const BOSS_PHASE_ANCHOR_FRACTION: readonly [number, number, number] = [0.05, 0.07, 0.09];
@@ -526,9 +542,17 @@ export const BALANCE = Object.freeze({
   TUTORIAL_SPEED_FACTOR,
   HARD_FLOOR_ENEMY_MULT,
   HARD_FLOOR_WINDOW_MULT,
+  HARD_FLOOR_PACK_BONUS,
   BOSS_TRICKLE_ENABLED,
   BOSS_TRICKLE_COUNT_FACTOR,
   BOSS_TRICKLE_GOLD_FACTOR,
+  BOSS_TRICKLE_PACK_SIZE,
+  PACK_SIZE_MIN,
+  PACK_SIZE_MAX,
+  PACK_STAGGER_SEC,
+  PACK_SPREAD_RAD,
+  FLOOR_CLOCK_BOOST,
+  FLOOR_CLOCK_BOOST_MAX_ALIVE,
   SPAWN_TIME_EXPONENT,
   GOLDEN_ANGLE_RAD,
   SPAWN_ANGLE_JITTER_RAD,
@@ -540,6 +564,7 @@ export const BALANCE = Object.freeze({
   floorEnemyCount,
   baseSpawnWindowSec,
   floorSpawnWindowSec,
+  packSizeForFloor,
   floorGoldIncome,
   goldPerEnemy,
   bossBounty,
