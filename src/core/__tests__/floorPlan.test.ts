@@ -1,13 +1,18 @@
 import { describe, expect, it } from 'vitest';
 import { ARENA } from '../../config/arena.config';
 import {
+  HARD_FLOOR_WINDOW_MULT,
+  INTER_WAVE_BREAK_SEC,
   PACK_SPREAD_RAD,
   PACK_STAGGER_SEC,
+  SPAWN_ANGLE_JITTER_RAD,
   TUTORIAL_SPEED_FACTOR,
+  baseSpawnWindowSec,
   enemySpeed,
   floorEnemyCount,
   floorGoldIncome,
   floorSpawnWindowSec,
+  interWaveBreakSec,
   isBossFloor,
   isGrandBossFloor,
   isHardFloor,
@@ -21,6 +26,9 @@ import { spawnBossForFloor, spawnEnemyAt } from '../waveGenerator';
 
 describe('FloorPlan, previewWave y spawnEnemyAt (PRD §5.1, §9.1.2–§9.1.3)', () => {
   const SEED = 12345;
+  /** Pincer arm count per floor: 2 on 1-8, 3 on 9-16, 4 from 17 on. */
+  const armCountFor = (floor: number): number =>
+    Math.min(4, 2 + Math.floor(Math.max(0, floor - 1) / 8));
 
   it('Determinismo: buildFloorPlan(12345, 7) llamado dos veces devuelve exactamente el mismo objeto FloorPlan', () => {
     const plan1 = buildFloorPlan(SEED, 7);
@@ -65,48 +73,57 @@ describe('FloorPlan, previewWave y spawnEnemyAt (PRD §5.1, §9.1.2–§9.1.3)',
     }
   });
 
-  it('En el piso 20 hay paquetes de tamaño packSizeForFloor(20): agrupando eventos con hueco temporal <= PACK_STAGGER_SEC + 1e-3, el tamaño de grupo máximo es k y todos los miembros de un paquete caben en un arco <= k*PACK_SPREAD_RAD', () => {
-    const f = 20;
+  it('Pincer: 2-4 brazos radiales; cada paquete usa un brazo como centro y se reparte round-robin (f=23 → 4 brazos)', () => {
+    const f = 23;
+    const TAU = Math.PI * 2;
+    const armCount = armCountFor(f);
+    expect(armCount).toBe(4);
+
+    // Replay del stream WAVE: baseAngle + un jitter por brazo (contrato determinista).
+    const replay = rngFor(SEED, 'WAVE', f);
+    const baseAngle = replay() * TAU;
+    const armAngles: number[] = [];
+    for (let a = 0; a < armCount; a++) {
+      armAngles.push(baseAngle + (a * TAU) / armCount + (replay() * 2 - 1) * SPAWN_ANGLE_JITTER_RAD);
+    }
+
     const plan = buildFloorPlan(SEED, f);
     const k = packSizeForFloor(f);
+    expect(plan.events.length).toBe(floorEnemyCount(f));
 
-    const groups: SpawnEvent[][] = [];
-    let currentGroup: SpawnEvent[] = [];
-    for (const ev of plan.events) {
-      if (currentGroup.length === 0) {
-        currentGroup.push(ev);
-      } else {
-        const prev = currentGroup[currentGroup.length - 1];
-        if (ev.tSec - prev.tSec <= PACK_STAGGER_SEC + 1e-3) {
-          currentGroup.push(ev);
-        } else {
-          groups.push(currentGroup);
-          currentGroup = [ev];
-        }
+    const angDist = (x: number, y: number): number => {
+      const d = Math.abs(x - y) % TAU;
+      return d > Math.PI ? TAU - d : d;
+    };
+    const nearestArm = (angle: number): number => {
+      let best = 0;
+      for (let a = 1; a < armCount; a++) {
+        if (angDist(angle, armAngles[a]) < angDist(angle, armAngles[best])) best = a;
       }
-    }
-    if (currentGroup.length > 0) {
-      groups.push(currentGroup);
+      return best;
+    };
+
+    // Cada evento cae dentro del abanico de su brazo: ±((k-1)/2) * PACK_SPREAD_RAD.
+    const maxOffset = ((k - 1) / 2) * PACK_SPREAD_RAD + 1e-4;
+    const perArm: number[] = new Array(armCount).fill(0);
+    for (const ev of plan.events) {
+      const arm = nearestArm(ev.angle);
+      expect(angDist(ev.angle, armAngles[arm])).toBeLessThanOrEqual(maxOffset);
+      perArm[arm] += 1;
     }
 
-    expect(groups.length).toBeGreaterThan(0);
-    const maxGroupSize = Math.max(...groups.map((g) => g.length));
-    expect(maxGroupSize).toBe(k);
+    // Reparto round-robin: pack j → brazo (j % armCount).
+    const P = Math.ceil(plan.totalEnemies / k);
+    const packSize = (j: number) => (j === P - 1 ? plan.totalEnemies - k * (P - 1) : k);
+    const expectedByArm: number[] = new Array(armCount).fill(0);
+    for (let j = 0; j < P; j++) expectedByArm[j % armCount] += packSize(j);
+    expect(perArm).toEqual(expectedByArm);
+    for (const count of perArm) expect(count).toBeGreaterThan(0);
 
-    const TAU = Math.PI * 2;
-    for (const group of groups) {
-      expect(group.length).toBeLessThanOrEqual(k);
-
-      const refAngle = group[0].angle;
-      const diffs = group.map((ev) => {
-        let diff = (ev.angle - refAngle) % TAU;
-        if (diff > Math.PI) diff -= TAU;
-        if (diff < -Math.PI) diff += TAU;
-        return diff;
-      });
-      const arc = Math.max(...diffs) - Math.min(...diffs);
-      expect(arc).toBeLessThanOrEqual(k * PACK_SPREAD_RAD + 1e-4);
-    }
+    // Los brazos siguen la progresión 2 → 3 → 4 por tramos de piso.
+    expect([1, 8].map(armCountFor)).toEqual([2, 2]);
+    expect([9, 16].map(armCountFor)).toEqual([3, 3]);
+    expect([17, 50].map(armCountFor)).toEqual([4, 4]);
   });
 
   it('Orden temporal no decreciente (events[i].tSec >= events[i - 1].tSec), primer evento tSec === 0 y último tSec <= spawnWindowSec + 1e-4', () => {
@@ -165,7 +182,7 @@ describe('FloorPlan, previewWave y spawnEnemyAt (PRD §5.1, §9.1.2–§9.1.3)',
     }
   });
 
-  it('Cobertura angular: el test de 6 sectores exige 6/6 para f >= 20 y al menos 4/6 para 10 <= f < 20', () => {
+  it('Cobertura angular: el test de 6 sectores exige 6/6 para f >= 20 (no jefe) y al menos 4/6 para 10 <= f < 20', () => {
     // Para 10 <= f < 20, al menos 4 de los 6 sectores reciben evento
     for (let f = 10; f < 20; f++) {
       const plan = buildFloorPlan(SEED, f);
@@ -173,8 +190,9 @@ describe('FloorPlan, previewWave y spawnEnemyAt (PRD §5.1, §9.1.2–§9.1.3)',
       expect(sectors.size).toBeGreaterThanOrEqual(4);
     }
 
-    // Para f >= 20, representativos cubren 6/6
-    const representativeFloors = [20, 23, 30, 40, 50, 75, 99];
+    // Para f >= 20 los brazos del pincer están a 90° y cada paquete ocupa
+    // ~k*PACK_SPREAD_RAD, por lo que los pisos normales siguen cubriendo 6/6.
+    const representativeFloors = [21, 23, 29, 41, 73, 97];
     for (const f of representativeFloors) {
       const plan = buildFloorPlan(SEED, f);
       const sectors = new Set(plan.events.map((ev) => Math.floor(ev.angle / (Math.PI / 3)) % 6));
@@ -190,6 +208,14 @@ describe('FloorPlan, previewWave y spawnEnemyAt (PRD §5.1, §9.1.2–§9.1.3)',
       const plan = buildFloorPlan(SEED, f);
       const sectors = new Set(plan.events.map((ev) => Math.floor(ev.angle / (Math.PI / 3)) % 6));
       expect(sectors.size).toBe(6);
+    }
+
+    // En pisos de jefe solo entran adds en paquetes de 2 (clusters estrechos):
+    // se exige al menos un sector por brazo, no cobertura completa.
+    for (const f of [20, 40, 50, 100]) {
+      const plan = buildFloorPlan(SEED, f);
+      const sectors = new Set(plan.events.map((ev) => Math.floor(ev.angle / (Math.PI / 3)) % 6));
+      expect(sectors.size).toBeGreaterThanOrEqual(armCountFor(f));
     }
   });
 
@@ -319,5 +345,28 @@ describe('FloorPlan, previewWave y spawnEnemyAt (PRD §5.1, §9.1.2–§9.1.3)',
     expect(boss50.isBoss).toBe(true);
     expect(boss50.kind).toBe('grandboss');
     expect(boss50.definitionId).toBe('0094');
+  });
+
+  it('Ritmo de pisos: ventana comprimida en 1-9, descanso 0 desde el piso 10 y enemigos más rápidos desde el 10', () => {
+    // Ventana de aparición: 16 + 0.25*f en 1-9, curva original desde el 10.
+    expect(baseSpawnWindowSec(1)).toBeCloseTo(16.25, 5);
+    expect(baseSpawnWindowSec(9)).toBeCloseTo(18.25, 5);
+    expect(baseSpawnWindowSec(10)).toBeCloseTo(34.5, 5);
+    expect(floorSpawnWindowSec(4)).toBeCloseTo((16 + 0.25 * 4) * HARD_FLOOR_WINDOW_MULT, 5);
+    expect(buildFloorPlan(SEED, 7).spawnWindowSec).toBeCloseTo(16 + 0.25 * 7, 5);
+
+    // Descanso entre oleadas: 0.6s en 1-9, solapado desde el 10.
+    expect(INTER_WAVE_BREAK_SEC).toBe(0.6);
+    expect(interWaveBreakSec(1)).toBe(0.6);
+    expect(interWaveBreakSec(9)).toBe(0.6);
+    expect(interWaveBreakSec(10)).toBe(0);
+
+    // Velocidad: 20 + 0.5*f hasta el 9, 25 + (f-10)*1.2 desde el 10, tope 90.
+    expect(enemySpeed(1)).toBeCloseTo(20.5, 5);
+    expect(enemySpeed(9)).toBeCloseTo(24.5, 5);
+    expect(enemySpeed(10)).toBeCloseTo(25, 5);
+    expect(enemySpeed(20)).toBeCloseTo(37, 5);
+    expect(enemySpeed(100)).toBe(90);
+    expect(enemySpeed(200)).toBe(90);
   });
 });

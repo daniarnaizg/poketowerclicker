@@ -41,8 +41,13 @@ export function bossTimerForFloor(floor: number): number {
 export const ENEMY_CONTACT_DAMAGE = 4;
 /** Contact damage grows per floor: ENEMY_CONTACT_DAMAGE x (1 + (floor-1) x this). */
 export const ENEMY_CONTACT_DAMAGE_FLOOR_SCALE = 0.01;
-/** Automatic breather (s) between a cleared wave and the next floor spawn. */
-export const INTER_WAVE_BREAK_SEC = 1.5;
+/** Breather (s) between a cleared wave and the next floor spawn on floors 1-9 (legacy alias). */
+export const INTER_WAVE_BREAK_SEC = 0.6;
+
+/** Automatic breather (s) after clearing `floor`; 0 from floor 10 on so waves overlap. */
+export function interWaveBreakSec(floor: number): number {
+  return floor < 10 ? 0.6 : 0;
+}
 export const TYPE_MULTIPLIER_SUPER_EFFECTIVE = 1.5;
 export const TYPE_MULTIPLIER_NOT_EFFECTIVE = 0.65;
 export const TYPE_MULTIPLIER_IMMUNE = 0;
@@ -184,9 +189,10 @@ export function enemyGoldValue(floor: number): number {
   return Math.floor(5 * Math.pow(1.102, floor - 1) + floor * 2);
 }
 
-/** Normal enemy speed px/s (slight floor scaling, capped). */
+/** Normal enemy speed px/s (aggressive scaling from floor 10, capped at 90). */
 export function enemySpeed(floor: number): number {
-  return Math.min(60, 20 + floor * 0.5);
+  if (floor < 10) return 20 + floor * 0.5;
+  return Math.min(90, 25 + (floor - 10) * 1.2);
 }
 
 // --- Spawner & Floor Rhythm (D20–D22, §2.1) ---
@@ -244,10 +250,11 @@ export function floorEnemyCount(floor: number): number {
   return base;
 }
 
-/** Base spawn window S(f) in seconds. */
+/** Base spawn window S(f) in seconds; floors 1-9 are compressed to a ~16s window. */
 export function baseSpawnWindowSec(floor: number): number {
   const f = Math.max(1, Math.floor(floor));
   if (f > 100) return Math.max(30, 45 - 0.1 * (f - 100));
+  if (f < 10) return 16 + 0.25 * f;
   return Math.min(45, 32 + 0.25 * f);
 }
 

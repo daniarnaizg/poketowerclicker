@@ -56,7 +56,7 @@ import {
   FLOOR_CLOCK_BOOST,
   FLOOR_CLOCK_BOOST_MAX_ALIVE,
   HOT_SWAP_COOLDOWN,
-  INTER_WAVE_BREAK_SEC,
+  interWaveBreakSec,
   isBossFloor,
   leakDamageForFloor,
   MAX_STARS,
@@ -92,7 +92,7 @@ const SWITCH_IN_SHIELD_SEC = SWITCH_IN_EFFECT_DURATION['SHIELD'];
 
 const FIXED_STEP_MS = FIXED_TIMESTEP * 1000;
 /** Cap sub-steps per call so a long frame stall cannot spiral. */
-const MAX_STEPS_PER_TICK = 5;
+const MAX_STEPS_PER_TICK = 20;
 
 /** Floating-text lifetime in seconds. */
 const FLOATING_TEXT_MAX_AGE = 1.0;
@@ -1255,7 +1255,7 @@ function applyInput(
     next = { ...next, autoAdvanceWave: input.setAutoAdvance };
     // Turning AUTO back on while awaiting manual advance resumes the countdown.
     if (input.setAutoAdvance === true && next.awaitingNextWave) {
-      next = { ...next, awaitingNextWave: false, interWaveTimerSec: INTER_WAVE_BREAK_SEC };
+      next = { ...next, awaitingNextWave: false, interWaveTimerSec: interWaveBreakSec(next.floor) };
     }
   }
   if (input.startNextWave && (next.awaitingNextWave || next.interWaveTimerSec !== undefined)) {
@@ -1785,10 +1785,19 @@ function stepOnce(state: GameState, config: GameConfig, rng: () => number): Game
 
   // 6. Wave cleared -> enter the breather (guarded so it triggers once).
   let finalEnemies = aliveEnemies;
+  const allEventsConsumed = floorRuntime
+    ? floorRuntime.nextEventIdx >= floorRuntime.plan.events.length
+    : true;
+  const allDead =
+    countAliveFloorEnemies(finalEnemies) === 0 && waveEnemiesRemaining <= 0;
+
+  // From floor 10 on, waves overlap: the next floor starts as soon as the spawn
+  // schedule is exhausted, and survivors carry over as stragglers. Bosses and
+  // the tutorial floors still require a full clear.
   const isFloorClear =
-    (floorRuntime ? floorRuntime.nextEventIdx >= floorRuntime.plan.events.length : true) &&
-    countAliveFloorEnemies(finalEnemies) === 0 &&
-    waveEnemiesRemaining <= 0;
+    isBossFloor(floor) || floor < 10
+      ? allEventsConsumed && allDead
+      : allEventsConsumed;
 
   if (
     isFloorClear &&
@@ -1796,7 +1805,7 @@ function stepOnce(state: GameState, config: GameConfig, rng: () => number): Game
     !awaitingNextWave
   ) {
     if (state.autoAdvanceWave === false) awaitingNextWave = true;
-    else interWaveTimerSec = INTER_WAVE_BREAK_SEC;
+    else interWaveTimerSec = interWaveBreakSec(floor);
   }
 
   // 7. Breather countdown -> spawn the next floor when it expires (the floor
@@ -1808,7 +1817,9 @@ function stepOnce(state: GameState, config: GameConfig, rng: () => number): Game
       floor += 1;
       phaseBannerText = undefined;
       const nextFloor = initFloorRuntime(config.seed ?? 1, floor, nextTextId);
-      finalEnemies = nextFloor.initialEnemies;
+      // Overlap: enemies still alive keep fighting into the new floor.
+      const stragglers = finalEnemies.filter((e) => e.alive);
+      finalEnemies = [...stragglers, ...nextFloor.initialEnemies];
       floorRuntime = nextFloor.floorRuntime;
       waveEnemiesRemaining = computeWaveEnemiesRemaining(floorRuntime, finalEnemies);
       nextTextId = nextFloor.nextId;
