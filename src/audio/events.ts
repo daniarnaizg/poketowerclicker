@@ -10,6 +10,7 @@ import type { SceneId } from './themes';
 
 export type AudioEvent =
   | { type: 'kill'; count: number }
+  | { type: 'hit' }
   | { type: 'hurt' }
   | { type: 'ultimate' }
   | { type: 'swap' }
@@ -19,6 +20,8 @@ export type AudioEvent =
   | { type: 'buy' }
   | { type: 'start' }
   | { type: 'gameOver' };
+
+export const SILENT_EVENTS: ReadonlySet<AudioEvent['type']> = new Set(['kill', 'floor']);
 
 function activeIndex(s: GameState): number {
   return s.team.findIndex((slot) => slot.isActive);
@@ -48,6 +51,10 @@ export function detectAudioEvents(prev: GameState | null, next: GameState): Audi
 
   const kills = next.runStats.totalKills - prev.runStats.totalKills;
   if (kills > 0) out.push({ type: 'kill', count: kills });
+
+  if ((next.runStats?.totalDamageDealt ?? 0) > (prev.runStats?.totalDamageDealt ?? 0)) {
+    out.push({ type: 'hit' });
+  }
 
   const sumTeamHp = (s: GameState) =>
     s.team.reduce((acc, sl) => acc + (sl.pokemon?.hp ?? 0), 0);

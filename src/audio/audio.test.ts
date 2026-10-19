@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { detectAudioEvents, sceneFor } from './events';
+import { detectAudioEvents, sceneFor, SILENT_EVENTS } from './events';
 import { THEMES, noteToMidi, parseMelody } from './themes';
 import type { GameState } from '../core/types';
 
@@ -73,6 +73,26 @@ describe('detectAudioEvents', () => {
   it('compra de mejora vs. nivel de equipo', () => {
     expect(detectAudioEvents(state(), state({ bastionUpgrades: { UP_ARROW: 1 } as never })).map((e) => e.type)).toEqual(['buy']);
     expect(detectAudioEvents(state(), state({ teamLevel: 2 })).map((e) => e.type)).toEqual(['levelUp']);
+  });
+
+  it('emite hit cuando totalDamageDealt sube y no cuando no cambia', () => {
+    const s0 = state({ runStats: { totalKills: 0, totalDamageDealt: 100 } as never });
+    const s1 = state({ runStats: { totalKills: 0, totalDamageDealt: 150 } as never });
+    const s2 = state({ runStats: { totalKills: 0, totalDamageDealt: 150 } as never });
+
+    expect(detectAudioEvents(s0, s1).map((e) => e.type)).toContain('hit');
+    expect(detectAudioEvents(s1, s2).map((e) => e.type)).not.toContain('hit');
+    expect(detectAudioEvents(state(), state()).map((e) => e.type)).not.toContain('hit');
+    expect(detectAudioEvents(state(), s0).map((e) => e.type)).toContain('hit');
+  });
+});
+
+describe('SILENT_EVENTS', () => {
+  it('contiene kill y floor y no contiene hurt ni hit', () => {
+    expect(SILENT_EVENTS.has('kill')).toBe(true);
+    expect(SILENT_EVENTS.has('floor')).toBe(true);
+    expect(SILENT_EVENTS.has('hurt')).toBe(false);
+    expect(SILENT_EVENTS.has('hit')).toBe(false);
   });
 });
 
