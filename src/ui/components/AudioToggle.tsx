@@ -56,7 +56,9 @@ export function AudioToggle() {
     <div class="flex items-center gap-1 shrink-0">
       <button
         type="button"
-        class="pk-btn flex h-8 w-8 shrink-0 items-center justify-center p-0"
+        class={`pk-btn flex h-8 w-8 shrink-0 items-center justify-center p-0 transition-all ${
+          musicMuted ? 'opacity-60 bg-[#e0e0e0]' : 'pk-btn-active'
+        }`}
         style={{ minHeight: 0 }}
         data-sfx="none"
         aria-label={musicMuted ? 'Activar música (BGM)' : 'Silenciar música (BGM)'}
@@ -68,7 +70,9 @@ export function AudioToggle() {
 
       <button
         type="button"
-        class="pk-btn flex h-8 w-8 shrink-0 items-center justify-center p-0"
+        class={`pk-btn flex h-8 w-8 shrink-0 items-center justify-center p-0 transition-all ${
+          sfxMuted ? 'opacity-60 bg-[#e0e0e0]' : 'pk-btn-active'
+        }`}
         style={{ minHeight: 0 }}
         data-sfx="none"
         aria-label={sfxMuted ? 'Activar efectos (SFX, tecla M)' : 'Silenciar efectos (SFX, tecla M)'}

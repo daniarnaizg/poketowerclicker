@@ -108,13 +108,34 @@ export const audio = {
     }
   },
 
-  isMuted: () => engine.getPrefs().muted,
+  isMuted: engine.isMuted,
   isMusicMuted: engine.isMusicMuted,
   isSfxMuted: engine.isSfxMuted,
-  toggleMute: engine.toggleMuted,
-  toggleMusic: engine.toggleMusic,
-  toggleSfx: engine.toggleSfx,
-  setMusicMuted: engine.setMusicMuted,
+  toggleMute: () => {
+    engine.unlock();
+    const next = engine.toggleMuted();
+    applyScene();
+    return next;
+  },
+  toggleMusic(): boolean {
+    engine.unlock();
+    const next = engine.toggleMusic();
+    applyScene();
+    return next;
+  },
+  toggleSfx(): boolean {
+    engine.unlock();
+    const next = engine.toggleSfx();
+    if (!next) {
+      playSfx('select');
+    }
+    return next;
+  },
+  setMusicMuted(muted: boolean): void {
+    engine.unlock();
+    engine.setMusicMuted(muted);
+    applyScene();
+  },
   setSfxMuted: engine.setSfxMuted,
   subscribe: engine.subscribe,
 };

@@ -39,10 +39,14 @@ function loadPrefs(): AudioPrefs {
     if (!raw) return { ...DEFAULT_PREFS };
     const p = JSON.parse(raw) as Partial<AudioPrefs>;
     const clamp = (v: unknown, d: number) => (typeof v === 'number' && v >= 0 && v <= 1 ? v : d);
+    // Legacy migration: si p.muted estaba guardado de la versión antigua de botón único,
+    // se limpia para que no bloquee los nuevos controles independientes.
+    const hasSeparate = typeof p.musicMuted === 'boolean' || typeof p.sfxMuted === 'boolean';
+    const legacyMuted = p.muted === true;
     return {
-      muted: p.muted === true,
-      musicMuted: p.musicMuted === true,
-      sfxMuted: p.sfxMuted === true,
+      muted: false,
+      musicMuted: hasSeparate ? p.musicMuted === true : legacyMuted,
+      sfxMuted: hasSeparate ? p.sfxMuted === true : legacyMuted,
       music: clamp(p.music, DEFAULT_PREFS.music),
       sfx: clamp(p.sfx, DEFAULT_PREFS.sfx),
     };
@@ -69,8 +73,8 @@ function applyGains(): void {
   if (!ctx || !master || !musicBus || !sfxBus) return;
   const t = ctx.currentTime;
   master.gain.setTargetAtTime(prefs.muted ? 0 : 1, t, 0.03);
-  musicBus.gain.setTargetAtTime(prefs.musicMuted || prefs.muted ? 0 : prefs.music * 0.5, t, 0.05);
-  sfxBus.gain.setTargetAtTime(prefs.sfxMuted || prefs.muted ? 0 : prefs.sfx * 0.9, t, 0.05);
+  musicBus.gain.setTargetAtTime(prefs.musicMuted ? 0 : prefs.music * 0.5, t, 0.05);
+  sfxBus.gain.setTargetAtTime(prefs.sfxMuted ? 0 : prefs.sfx * 0.9, t, 0.05);
 }
 
 /** Crea (una sola vez) el contexto de audio. Llamar desde un gesto del usuario. */
@@ -125,16 +129,17 @@ export function getPrefs(): Readonly<AudioPrefs> {
 }
 
 export function isMusicMuted(): boolean {
-  return prefs.muted || !!prefs.musicMuted;
+  return !!prefs.musicMuted;
 }
 
 export function isSfxMuted(): boolean {
-  return prefs.muted || !!prefs.sfxMuted;
+  return !!prefs.sfxMuted;
 }
 
 export function setMusicMuted(muted: boolean): void {
-  prefs = { ...prefs, musicMuted: muted };
+  prefs = { ...prefs, musicMuted: muted, muted: false };
   savePrefs();
+  unlock();
   applyGains();
   notify();
 }
@@ -146,8 +151,9 @@ export function toggleMusic(): boolean {
 }
 
 export function setSfxMuted(muted: boolean): void {
-  prefs = { ...prefs, sfxMuted: muted };
+  prefs = { ...prefs, sfxMuted: muted, muted: false };
   savePrefs();
+  unlock();
   applyGains();
   notify();
 }
@@ -158,16 +164,22 @@ export function toggleSfx(): boolean {
   return next;
 }
 
+export function isMuted(): boolean {
+  return !!(prefs.musicMuted && prefs.sfxMuted);
+}
+
 export function setMuted(muted: boolean): void {
-  prefs = { ...prefs, muted };
+  prefs = { ...prefs, muted: false, musicMuted: muted, sfxMuted: muted };
   savePrefs();
+  unlock();
   applyGains();
   notify();
 }
 
 export function toggleMuted(): boolean {
-  setMuted(!prefs.muted);
-  return prefs.muted;
+  const shouldMute = !isMuted();
+  setMuted(shouldMute);
+  return shouldMute;
 }
 
 export function setVolumes(v: Partial<Pick<AudioPrefs, 'music' | 'sfx'>>): void {
