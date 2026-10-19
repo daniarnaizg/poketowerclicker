@@ -105,6 +105,9 @@ const EFFECT_MAX_AGE: Record<VisualEffect['kind'], number> = {
   IMPACT: 0.24,
 };
 
+export const MAX_FLOATING_TEXTS = 40;
+export const MAX_IMPACT_EFFECTS = 60;
+
 /** Slot index currently flagged active, or -1 when the team is empty. */
 function activeSlotIndex(state: GameState): number {
   return state.team.findIndex((s) => s.isActive);
@@ -118,6 +121,125 @@ function createFloatingText(
   color: string,
 ): FloatingText {
   return { id, x, y, text, color, age: 0, maxAge: FLOATING_TEXT_MAX_AGE };
+}
+
+export function trimFloatingTexts(floatingTexts: FloatingText[]): void {
+  if (floatingTexts.length > MAX_FLOATING_TEXTS) {
+    floatingTexts.splice(0, floatingTexts.length - MAX_FLOATING_TEXTS);
+  }
+}
+
+export function pushGoldText(
+  floatingTexts: FloatingText[],
+  goldGained: number,
+  enemy: { x: number; y: number },
+  allocId?: (() => number) | number,
+): void;
+export function pushGoldText(
+  floatingTexts: FloatingText[],
+  goldGained: number,
+  x: number,
+  y: number,
+  allocId?: (() => number) | number,
+): void;
+export function pushGoldText(
+  floatingTexts: FloatingText[],
+  goldGained: number,
+  enemyOrX: { x: number; y: number } | number,
+  yOrAllocId?: number | (() => number),
+  maybeAllocId?: (() => number) | number,
+): void {
+  const roundedGold = Math.floor(goldGained);
+  if (roundedGold <= 0) return;
+
+  let x: number;
+  let y: number;
+  let allocId: (() => number) | number | undefined;
+
+  if (typeof enemyOrX === 'object') {
+    x = enemyOrX.x;
+    y = enemyOrX.y;
+    allocId = yOrAllocId as (() => number) | number | undefined;
+  } else {
+    x = enemyOrX;
+    y = yOrAllocId as number;
+    allocId = maybeAllocId;
+  }
+
+  const existing = floatingTexts.find(
+    (t) => t.color === '#ffd700' && t.text.startsWith('+') && t.age <= 0.25,
+  );
+
+  if (existing) {
+    const prev = parseInt(existing.text.slice(1), 10) || 0;
+    existing.text = `+${prev + roundedGold}`;
+    existing.age = 0;
+  } else {
+    const id = typeof allocId === 'function' ? allocId() : (allocId ?? 0);
+    floatingTexts.push(createFloatingText(id, x, y, `+${roundedGold}`, '#ffd700'));
+    trimFloatingTexts(floatingTexts);
+  }
+}
+
+export function pushDamageText(
+  floatingTexts: FloatingText[],
+  amount: number,
+  enemy: { x: number; y: number },
+  color?: string,
+  allocId?: (() => number) | number,
+): void;
+export function pushDamageText(
+  floatingTexts: FloatingText[],
+  amount: number,
+  x: number,
+  y: number,
+  color?: string,
+  allocId?: (() => number) | number,
+): void;
+export function pushDamageText(
+  floatingTexts: FloatingText[],
+  amount: number,
+  enemyOrX: { x: number; y: number } | number,
+  colorOrY?: string | number,
+  allocIdOrColor?: (() => number) | number | string,
+  maybeAllocId?: (() => number) | number,
+): void {
+  const rounded = Math.round(amount);
+  if (rounded < 0) return;
+
+  let x: number;
+  let y: number;
+  let color = '#ffffff';
+  let alloc: (() => number) | number | undefined;
+
+  if (typeof enemyOrX === 'object') {
+    x = enemyOrX.x;
+    y = enemyOrX.y;
+    if (typeof colorOrY === 'string') color = colorOrY;
+    alloc = allocIdOrColor as (() => number) | number | undefined;
+  } else {
+    x = enemyOrX;
+    y = typeof colorOrY === 'number' ? colorOrY : 0;
+    if (typeof allocIdOrColor === 'string') color = allocIdOrColor;
+    alloc = maybeAllocId;
+  }
+
+  const existing = floatingTexts.find((t) => {
+    if (t.age > 0.15) return false;
+    if (!/^\d+$/.test(t.text)) return false;
+    const dx = t.x - x;
+    const dy = t.y - y;
+    return dx * dx + dy * dy < 16 * 16;
+  });
+
+  if (existing) {
+    const prev = parseInt(existing.text, 10) || 0;
+    existing.text = `${prev + rounded}`;
+  } else {
+    const id = typeof alloc === 'function' ? alloc() : (alloc ?? 0);
+    floatingTexts.push(createFloatingText(id, x, y, `${rounded}`, color));
+    trimFloatingTexts(floatingTexts);
+  }
 }
 
 function createEffect(
@@ -451,6 +573,34 @@ function createProjectile(
   return createProjectileAtPoint(id, active, target.x, target.y, speed, bounce);
 }
 
+/**
+ * Select the `k <= 5` living enemies nearest to the center in O(E·k),
+ * traversing `living` exactly once.
+ */
+export function selectNearestK(living: readonly Enemy[], k: number): Enemy[] {
+  if (k <= 0 || living.length === 0) return [];
+  const top: { enemy: Enemy; dist: number }[] = [];
+  for (let i = 0; i < living.length; i++) {
+    const enemy = living[i];
+    const dist = dist2ToCenter(enemy);
+    if (top.length < k) {
+      let insertIdx = top.length;
+      while (insertIdx > 0 && top[insertIdx - 1].dist > dist) {
+        insertIdx--;
+      }
+      top.splice(insertIdx, 0, { enemy, dist });
+    } else if (dist < top[top.length - 1].dist) {
+      top.pop();
+      let insertIdx = top.length;
+      while (insertIdx > 0 && top[insertIdx - 1].dist > dist) {
+        insertIdx--;
+      }
+      top.splice(insertIdx, 0, { enemy, dist });
+    }
+  }
+  return top.map((item) => item.enemy);
+}
+
 /** Active Pokémon fires at the nearest enemies according to its SPD + pattern. */
 function fireProjectiles(
   state: GameState,
@@ -473,7 +623,7 @@ function fireProjectiles(
   if (shots <= 0) return [];
 
   const multi = projectileCount(state.bastionUpgrades);
-  const targets = [...living].sort((a, b) => dist2ToCenter(a) - dist2ToCenter(b)).slice(0, multi);
+  const targets = selectNearestK(living, multi);
   const speed = PROJECTILE_SPEED[active.pattern];
   const chainBounces =
     multi - 1 + (starsOf(active) >= STAR_PATTERN ? CHAIN_EXTRA_BOUNCES_AT_MAX_PATTERN : 0);
@@ -603,8 +753,15 @@ function applySwitchInBurst(
     } else {
       caught.push({ enemy, amount: result.appliedAmount });
     }
-    floatingTexts.push(createFloatingText(nextTextId++, enemy.x, enemy.y, `${result.appliedAmount}`, '#ffd166'));
+    pushDamageText(floatingTexts, result.appliedAmount, enemy, '#ffd166', () => nextTextId++);
   }
+
+  if (killsDelta >= 3) {
+    floatingTexts.push(
+      createFloatingText(nextTextId++, ARENA.CENTER, ARENA.CENTER, `x${killsDelta}`, '#ff9f1c'),
+    );
+  }
+  trimFloatingTexts(floatingTexts);
 
   // 3★+: the entry wave also carries a status (or a temporary bastion shield).
   if (starsOf(incoming) >= STAR_SWITCH_IN) {
@@ -1012,12 +1169,13 @@ function applyUltimate(state: GameState, config: GameConfig, rng: () => number):
   let currentFloorRuntime = floorRuntime;
   let phaseBannerText = state.phaseBannerText;
 
+  let ultKills = 0;
   for (const enemy of enemies) {
     if (!enemy.alive || !inRange(enemy)) continue;
     const outcome = hitEnemy(enemy, baseDmg, attacker, state, rng, config, bonuses);
     totalDamage += outcome.amount;
     damagePerSlot[slotIndex] += outcome.amount;
-    floatingTexts.push(createFloatingText(nextTextId++, enemy.x, enemy.y, `${outcome.amount}`, '#c084fc'));
+    pushDamageText(floatingTexts, outcome.amount, enemy, '#c084fc', () => nextTextId++);
 
     if (outcome.phaseTriggered) {
       currentFloorRuntime = enqueueBossPhaseAdds(currentFloorRuntime, config.seed ?? 1, state.floor, outcome.phaseTriggered);
@@ -1026,6 +1184,7 @@ function applyUltimate(state: GameState, config: GameConfig, rng: () => number):
     }
 
     if (outcome.killed) {
+      ultKills += 1;
       totalKills += 1;
       gold += outcome.goldGained;
       totalGold += outcome.goldGained;
@@ -1035,11 +1194,18 @@ function applyUltimate(state: GameState, config: GameConfig, rng: () => number):
         }
         currentFloorRuntime = cleanupBossAdds(enemies, currentFloorRuntime);
       }
-      floatingTexts.push(createFloatingText(nextTextId++, enemy.x, enemy.y, `+${outcome.goldGained}`, '#ffd700'));
+      pushGoldText(floatingTexts, outcome.goldGained, enemy, () => nextTextId++);
     } else if (ult.status) {
       applyStatus(enemy, ult.status, ULTIMATE_STATUS_DURATION, { sourceDamage: outcome.amount, slot: slotIndex });
     }
   }
+
+  if (ultKills >= 3) {
+    floatingTexts.push(
+      createFloatingText(nextTextId++, ARENA.CENTER, ARENA.CENTER, `x${ultKills}`, '#ff9f1c'),
+    );
+  }
+  trimFloatingTexts(floatingTexts);
 
   const finalEnemies = enemies.filter((e) => e.alive);
   const waveEnemiesRemaining = computeWaveEnemiesRemaining(currentFloorRuntime, finalEnemies);
@@ -1347,7 +1513,7 @@ function stepOnce(state: GameState, config: GameConfig, rng: () => number): Game
             }
             floorRuntime = cleanupBossAdds(enemies, floorRuntime);
           }
-          floatingTexts.push(createFloatingText(nextTextId++, enemy.x, enemy.y, `+${result.goldGained}`, '#ffd700'));
+          pushGoldText(floatingTexts, result.goldGained, enemy, () => nextTextId++);
           continue;
         }
       }
@@ -1413,11 +1579,11 @@ function stepOnce(state: GameState, config: GameConfig, rng: () => number): Game
     baseDmg: number,
     types: readonly PokemonType[],
     color: string,
-  ): void => {
+  ): boolean => {
     const outcome = hitEnemy(enemy, baseDmg, attackerOf(currentActive, types), state, rng, config, bonuses);
     totalDamage += outcome.amount;
     if (currentSlotIndex >= 0) damagePerSlot[currentSlotIndex] += outcome.amount;
-    floatingTexts.push(createFloatingText(nextTextId++, enemy.x, enemy.y, `${outcome.amount}`, color));
+    pushDamageText(floatingTexts, outcome.amount, enemy, color, () => nextTextId++);
     if (outcome.phaseTriggered) {
       floorRuntime = enqueueBossPhaseAdds(floorRuntime, config.seed ?? 1, floor, outcome.phaseTriggered);
       floatingTexts.push(createFloatingText(nextTextId++, enemy.x, enemy.y, `¡FASE ${outcome.phaseTriggered}!`, '#f8a030'));
@@ -1433,10 +1599,9 @@ function stepOnce(state: GameState, config: GameConfig, rng: () => number): Game
         }
         floorRuntime = cleanupBossAdds(enemies, floorRuntime);
       }
-      floatingTexts.push(
-        createFloatingText(nextTextId++, enemy.x, enemy.y, `+${outcome.goldGained}`, '#ffd700'),
-      );
+      pushGoldText(floatingTexts, outcome.goldGained, enemy, () => nextTextId++);
     }
+    return outcome.killed;
   };
 
   // 2. Auto-fire.
@@ -1447,6 +1612,7 @@ function stepOnce(state: GameState, config: GameConfig, rng: () => number): Game
   }
 
   // 3. Projectiles move, then resolve hits (damage, kills, splash, pierce/bounce).
+  let liveImpacts = effects.reduce((count, fx) => count + (fx.kind === 'IMPACT' ? 1 : 0), 0);
   const liveProjectiles: Projectile[] = [];
   for (const p of projectiles) {
     p.x += p.vx * dt;
@@ -1461,9 +1627,16 @@ function stepOnce(state: GameState, config: GameConfig, rng: () => number): Game
       const dy = enemy.y - p.y;
       if (dx * dx + dy * dy > rr * rr) continue;
 
-      strike(enemy, p.damage, p.types, '#ffffff');
-      effects.push(createEffect(nextTextId++, 'IMPACT', p.types[0], enemy.x, enemy.y));
-      p.hitIds = [...(p.hitIds ?? []), enemy.id];
+      let splashKills = 0;
+      if (strike(enemy, p.damage, p.types, '#ffffff')) {
+        splashKills += 1;
+      }
+      if (liveImpacts < MAX_IMPACT_EFFECTS) {
+        effects.push(createEffect(nextTextId++, 'IMPACT', p.types[0], enemy.x, enemy.y));
+        liveImpacts += 1;
+      }
+      if (p.hitIds) p.hitIds.push(enemy.id);
+      else p.hitIds = [enemy.id];
 
       // AOE: the explosion also hurts everything near the impact point.
       if (p.splashRadius) {
@@ -1472,9 +1645,17 @@ function stepOnce(state: GameState, config: GameConfig, rng: () => number): Game
           const sx = other.x - enemy.x;
           const sy = other.y - enemy.y;
           if (sx * sx + sy * sy <= p.splashRadius * p.splashRadius) {
-            strike(other, p.damage * AOE_SPLASH_DAMAGE_FACTOR, p.types, '#ffe0a0');
+            if (strike(other, p.damage * AOE_SPLASH_DAMAGE_FACTOR, p.types, '#ffe0a0')) {
+              splashKills += 1;
+            }
           }
         }
+      }
+
+      if (splashKills >= 3) {
+        floatingTexts.push(
+          createFloatingText(nextTextId++, enemy.x, enemy.y, `x${splashKills}`, '#ff9f1c'),
+        );
       }
 
       if (p.pierce && p.pierce > 0) {
@@ -1532,6 +1713,7 @@ function stepOnce(state: GameState, config: GameConfig, rng: () => number): Game
   };
   team = syncCooldownMirrors(team, hotSwapCooldowns);
   const nextShield = Math.max(0, bastionShieldSec - dt);
+  trimFloatingTexts(floatingTexts);
 
   // 5. Defeat check: all team wiped, or a boss outlived its timer.
   const bossExpired =
