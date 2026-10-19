@@ -707,22 +707,22 @@ describe('Block 3A.2-V — Individual Vitality & Route Stop Config', () => {
 
 describe('WP3 — Continuous Spawner Queue & ALIVE_CAP', () => {
   it('caps alive enemies at ALIVE_CAP, keeps pending events in queue, and emits from queue upon kills', () => {
-    // Floor 85 has floorEnemyCount(85) = 93 > ALIVE_CAP (70)
-    expect(floorEnemyCount(85)).toBe(93);
-    expect(floorEnemyCount(85)).toBeGreaterThan(ALIVE_CAP);
+    const testFloor = 79;
+    const expectedEnemyCount = floorEnemyCount(testFloor);
+    expect(expectedEnemyCount).toBeGreaterThan(ALIVE_CAP);
 
     const base = startingRun(42);
-    // Transition to floor 85 by setting floor 84 with breather expiring
+    // Transition to floor testFloor by setting floor testFloor - 1 with breather expiring
     const cleared: GameState = {
       ...base,
-      floor: 84,
+      floor: testFloor - 1,
       enemies: [],
       waveEnemiesRemaining: 0,
       interWaveTimerSec: 0.01,
     };
     let state = tickGame(cleared, {}, config, 16.7, mulberry32(1));
-    expect(state.floor).toBe(85);
-    expect(state.floorRuntime?.plan.events.length).toBe(93);
+    expect(state.floor).toBe(testFloor);
+    expect(state.floorRuntime?.plan.events.length).toBe(expectedEnemyCount);
 
     // Passive player: set atk: 0 on active Pokémon so projectiles do not kill enemies
     state = {
@@ -733,7 +733,7 @@ describe('WP3 — Continuous Spawner Queue & ALIVE_CAP', () => {
       enemies: state.enemies.map((e) => ({ ...e, speed: 0 })),
     };
 
-    const spawnWindowSec = floorSpawnWindowSec(85);
+    const spawnWindowSec = floorSpawnWindowSec(testFloor);
     const rng = mulberry32(100);
 
     // Advance across the entire spawn window
@@ -751,11 +751,11 @@ describe('WP3 — Continuous Spawner Queue & ALIVE_CAP', () => {
     const aliveCount = state.enemies.filter((e) => e.alive).length;
     expect(aliveCount).toBe(ALIVE_CAP);
 
-    // Spawner queue retains 93 - 70 = 23 pending events
+    // Spawner queue retains pending events: floorEnemyCount(f) - ALIVE_CAP
     const pendingEvents = state.floorRuntime!.plan.events.length - state.floorRuntime!.nextEventIdx;
-    expect(pendingEvents).toBe(23);
-    expect(state.floorRuntime!.nextEventIdx).toBe(70);
-    expect(state.waveEnemiesRemaining).toBe(93);
+    expect(pendingEvents).toBe(expectedEnemyCount - ALIVE_CAP);
+    expect(state.floorRuntime!.nextEventIdx).toBe(ALIVE_CAP);
+    expect(state.waveEnemiesRemaining).toBe(expectedEnemyCount);
 
     // Eliminate 10 alive enemies
     let killed = 0;
@@ -773,16 +773,18 @@ describe('WP3 — Continuous Spawner Queue & ALIVE_CAP', () => {
         (state.floorRuntime!.plan.events.length - state.floorRuntime!.nextEventIdx) +
         enemiesWith10Killed.filter((e) => e.alive).length,
     };
-    expect(state.enemies.filter((e) => e.alive).length).toBe(60);
-    expect(state.waveEnemiesRemaining).toBe(83);
+    expect(state.enemies.filter((e) => e.alive).length).toBe(ALIVE_CAP - 10);
+    expect(state.waveEnemiesRemaining).toBe(expectedEnemyCount - 10);
 
     // Next tick: exactly 10 events are emitted from queue to refill to ALIVE_CAP without losing any
     state = tickGame(state, {}, config, 16.7, rng);
 
     expect(state.enemies.filter((e) => e.alive).length).toBe(ALIVE_CAP);
-    expect(state.floorRuntime!.nextEventIdx).toBe(80);
-    expect(state.floorRuntime!.plan.events.length - state.floorRuntime!.nextEventIdx).toBe(13);
-    expect(state.waveEnemiesRemaining).toBe(83);
+    expect(state.floorRuntime!.nextEventIdx).toBe(ALIVE_CAP + 10);
+    expect(state.floorRuntime!.plan.events.length - state.floorRuntime!.nextEventIdx).toBe(
+      expectedEnemyCount - ALIVE_CAP - 10,
+    );
+    expect(state.waveEnemiesRemaining).toBe(expectedEnemyCount - 10);
   });
 
   it('strictly satisfies state.waveEnemiesRemaining === pending queue events + alive enemies on every tick', () => {
