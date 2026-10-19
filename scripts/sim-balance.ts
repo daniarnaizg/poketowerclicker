@@ -53,6 +53,8 @@ export interface FloorMetrics {
   leaks: number;
   leakRatePhi: number;
   maxAlive: number;
+  meanAlive: number;
+  emptyArenaFraction: number;
   isBoss: boolean;
   bossTtkSec?: number;
   maxUltPctOfBossMaxHp?: number;
@@ -68,6 +70,8 @@ export interface ZoneSummary {
   medianDurationSec: number;
   medianCleanupTailSec: number;
   medianLeakRatePhi: number;
+  medianMeanAlive: number;
+  medianEmptyArenaFraction: number;
 }
 
 export interface SimOptions {
@@ -171,6 +175,9 @@ export function runSim(opts: SimOptions): SimRunResult {
   let floorCombatSec = 0;
   let floorLeaks = 0;
   let floorMaxAlive = 0;
+  let floorSpawnTicks = 0;
+  let floorSpawnAliveSum = 0;
+  let floorSpawnEmptyTicks = 0;
   let floorMaxUltPct = 0;
   let floorHpLost = 0;
   let floorGoldEarned = 0;
@@ -193,6 +200,8 @@ export function runSim(opts: SimOptions): SimRunResult {
     const isBoss = isBossFloor(fl);
     const cleanupTailSec = Math.max(0, floorCombatSec - floorSpawnWindow);
     const leakRatePhi = floorTotalEnemies > 0 ? floorLeaks / floorTotalEnemies : 0;
+    const meanAlive = floorSpawnTicks > 0 ? floorSpawnAliveSum / floorSpawnTicks : 0;
+    const emptyArenaFraction = floorSpawnTicks > 0 ? floorSpawnEmptyTicks / floorSpawnTicks : 0;
 
     const teamPkm = s.team
       .map((slot) => slot.pokemon)
@@ -209,6 +218,8 @@ export function runSim(opts: SimOptions): SimRunResult {
       leaks: floorLeaks,
       leakRatePhi,
       maxAlive: floorMaxAlive,
+      meanAlive,
+      emptyArenaFraction,
       isBoss,
       bossTtkSec: isBoss ? bossTtkSec : undefined,
       maxUltPctOfBossMaxHp: isBoss ? floorMaxUltPct : undefined,
@@ -359,6 +370,14 @@ export function runSim(opts: SimOptions): SimRunResult {
       if (aliveCount > floorMaxAlive) floorMaxAlive = aliveCount;
       if (aliveCount > globalMaxAliveObserved) globalMaxAliveObserved = aliveCount;
 
+      if (s.floorRuntime && s.floorRuntime.nextEventIdx < s.floorRuntime.plan.events.length) {
+        floorSpawnTicks++;
+        floorSpawnAliveSum += aliveCount;
+        if (aliveCount === 0) {
+          floorSpawnEmptyTicks++;
+        }
+      }
+
       // Boss TTK tracking
       const boss = s.enemies.find((e) => e.isBoss);
       if (boss) {
@@ -412,6 +431,9 @@ export function runSim(opts: SimOptions): SimRunResult {
       floorCombatSec = 0;
       floorLeaks = 0;
       floorMaxAlive = 0;
+      floorSpawnTicks = 0;
+      floorSpawnAliveSum = 0;
+      floorSpawnEmptyTicks = 0;
       floorMaxUltPct = 0;
       floorHpLost = 0;
       floorGoldEarned = 0;
@@ -471,6 +493,8 @@ export function runSim(opts: SimOptions): SimRunResult {
       medianDurationSec: median(list.map((m) => m.durationSec)),
       medianCleanupTailSec: median(list.map((m) => m.cleanupTailSec)),
       medianLeakRatePhi: median(list.map((m) => m.leakRatePhi)),
+      medianMeanAlive: median(list.map((m) => m.meanAlive)),
+      medianEmptyArenaFraction: median(list.map((m) => m.emptyArenaFraction)),
     };
   });
 
@@ -651,13 +675,13 @@ console.log(
   `Run de referencia: Semilla ${representativeRun.options.seed}, F_end = Piso ${representativeRun.floorReached}`,
 );
 console.log(
-  '┌──────┬──────────┬──────────┬──────────┬──────────────┬──────────────┬──────────┬──────────────────────┐',
+  '┌──────┬──────────┬──────────┬──────────┬──────────────┬──────────────┬──────────┬──────────────┬───────────────┬──────────────────────┐',
 );
 console.log(
-  '│ Zona │ Nombre   │ Rango    │ Pisos    │ Duración (s) │ Cola (s)     │ φ Fugas  │ Objetivo §2.4        │',
+  '│ Zona │ Nombre   │ Rango    │ Pisos    │ Duración (s) │ Cola (s)     │ φ Fugas  │ Vivos medios │ Arena vacía % │ Objetivo §2.4        │',
 );
 console.log(
-  '├──────┼──────────┼──────────┼──────────┼──────────────┼──────────────┼──────────┼──────────────────────┤',
+  '├──────┼──────────┼──────────┼──────────┼──────────────┼──────────────┼──────────┼──────────────┼───────────────┼──────────────────────┤',
 );
 
 for (const zs of representativeRun.zoneSummaries) {
@@ -670,11 +694,12 @@ for (const zs of representativeRun.zoneSummaries) {
   console.log(
     `│ ${zs.zone.padEnd(4)} │ ${zs.name.padEnd(8)} │ ${zs.floorRange.padEnd(8)} │ ${zs.floorCount.toString().padStart(8)} │ ` +
       `${zs.medianDurationSec.toFixed(1).padStart(12)} │ ${zs.medianCleanupTailSec.toFixed(1).padStart(12)} │ ` +
-      `${formatPct(zs.medianLeakRatePhi).padStart(8)} │ ${target.padEnd(20)} │`,
+      `${formatPct(zs.medianLeakRatePhi).padStart(8)} │ ${zs.medianMeanAlive.toFixed(1).padStart(12)} │ ` +
+      `${formatPct(zs.medianEmptyArenaFraction).padStart(13)} │ ${target.padEnd(20)} │`,
   );
 }
 console.log(
-  '└──────┴──────────┴──────────┴──────────┴──────────────┴──────────────┴──────────┴──────────────────────┘',
+  '└──────┴──────────┴──────────┴──────────┴──────────────┴──────────────┴──────────┴──────────────┴───────────────┴──────────────────────┘',
 );
 
 // Aggregate across all seeds of Perfil Intermedio 1.5 cps
@@ -694,13 +719,13 @@ for (const run of inter15cpsRuns) {
 
 console.log(`\nAgregado general (${inter15cpsRuns.length} semillas, total ${inter15cpsRuns.reduce((a, r) => a + r.floorMetrics.length, 0)} pisos simulados):`);
 console.log(
-  '┌──────┬──────────┬──────────┬──────────────┬──────────────┬──────────┬──────────────────────┐',
+  '┌──────┬──────────┬──────────┬──────────────┬──────────────┬──────────┬──────────────┬───────────────┬──────────────────────┐',
 );
 console.log(
-  '│ Zona │ Nombre   │ Pisos    │ Duración (s) │ Cola (s)     │ φ Fugas  │ Objetivo §2.4        │',
+  '│ Zona │ Nombre   │ Pisos    │ Duración (s) │ Cola (s)     │ φ Fugas  │ Vivos medios │ Arena vacía % │ Objetivo §2.4        │',
 );
 console.log(
-  '├──────┼──────────┼──────────┼──────────────┼──────────────┼──────────┼──────────────────────┤',
+  '├──────┼──────────┼──────────┼──────────────┼──────────────┼──────────┼──────────────┼───────────────┼──────────────────────┤',
 );
 const zoneNames: Record<'A' | 'B' | 'C' | 'D', string> = {
   A: 'Tensión',
@@ -713,6 +738,8 @@ for (const z of ['A', 'B', 'C', 'D'] as const) {
   const medDur = median(list.map((m) => m.durationSec));
   const medTail = median(list.map((m) => m.cleanupTailSec));
   const medPhi = median(list.map((m) => m.leakRatePhi));
+  const medMeanAlive = median(list.map((m) => m.meanAlive));
+  const medEmptyFrac = median(list.map((m) => m.emptyArenaFraction));
   let target = '';
   if (z === 'A') target = 'φ 5–20%, cola 10–25s';
   else if (z === 'B') target = 'φ ≤ 3%, cola ≤ 5s';
@@ -722,11 +749,12 @@ for (const z of ['A', 'B', 'C', 'D'] as const) {
   console.log(
     `│ ${z.padEnd(4)} │ ${zoneNames[z].padEnd(8)} │ ${list.length.toString().padStart(8)} │ ` +
       `${medDur.toFixed(1).padStart(12)} │ ${medTail.toFixed(1).padStart(12)} │ ` +
-      `${formatPct(medPhi).padStart(8)} │ ${target.padEnd(20)} │`,
+      `${formatPct(medPhi).padStart(8)} │ ${medMeanAlive.toFixed(1).padStart(12)} │ ` +
+      `${formatPct(medEmptyFrac).padStart(13)} │ ${target.padEnd(20)} │`,
   );
 }
 console.log(
-  '└──────┴──────────┴──────────┴──────────────┴──────────────┴──────────┴──────────────────────┘',
+  '└──────┴──────────┴──────────┴──────────────┴──────────────┴──────────┴──────────────┴───────────────┴──────────────────────┘',
 );
 
 // ---------------------------------------------------------------------------
@@ -829,7 +857,7 @@ console.log(
   `[§7.1.1] Arco por zonas A–D: ${representativeRun.zoneSummaries.length === 4 ? 'CALIBRADO ✓' : 'INCOMPLETO ✗'} (Zonas A–D identificadas y tabuladas)`,
 );
 console.log(
-  `[§7.1.2] Duración de piso normal: Mediana en Zona B = ${representativeRun.zoneSummaries[1]?.medianDurationSec.toFixed(1)}s (Obj: 50–70s) ✓`,
+  `[§7.1.2] Duración de piso normal: Mediana en Zona B = ${representativeRun.zoneSummaries[1]?.medianDurationSec.toFixed(1)}s (Obj: 35–45s) ✓`,
 );
 console.log(
   `[§7.1.3] Habilidad importa: 4 cps (+${clickGainPct.toFixed(1)}%) supera a 0 cps (Obj: ≥ +15%) => ${clickGainPct >= 15 ? 'CUMPLE ✓' : 'A CALIBRAR ✗'}`,
@@ -845,5 +873,27 @@ console.log(
 );
 console.log(
   `[§7.1.7] Tope respetado: Max alive (${globalMaxAliveObserved}) <= ALIVE_CAP (${ALIVE_CAP}) => ${aliveCapOk ? 'CUMPLE ✓' : 'FALLA ✗'}`,
+);
+
+// Criterios de calibración P-06 (Perfil Intermedio 1.5 cps, pisos >= 3 de zonas B y C)
+const inter15NormalFloorsB = pooledZones.B.filter((fm) => !fm.isBoss && fm.floor >= 3);
+const medDurNormalB = median(inter15NormalFloorsB.map((fm) => fm.durationSec));
+const critDurNormalBOk = medDurNormalB >= 35 && medDurNormalB <= 45;
+
+const inter15FloorsBC = [...pooledZones.B, ...pooledZones.C].filter((fm) => fm.floor >= 3);
+const medMeanAliveBC = median(inter15FloorsBC.map((fm) => fm.meanAlive));
+const critMeanAliveOk = medMeanAliveBC >= 4;
+
+const medEmptyFracBC = median(inter15FloorsBC.map((fm) => fm.emptyArenaFraction));
+const critEmptyFracOk = medEmptyFracBC <= 0.10;
+
+console.log(
+  `[§7.1.8] Duración de piso normal en zona B (pisos >= 3): Mediana = ${medDurNormalB.toFixed(1)}s (Obj: 35–45s) => ${critDurNormalBOk ? 'CUMPLE ✓' : 'A CALIBRAR ✗'}`,
+);
+console.log(
+  `[§7.1.9] Densidad de enemigos meanAlive (zonas B–C, pisos >= 3): Mediana = ${medMeanAliveBC.toFixed(2)} (Obj: >= 4) => ${critMeanAliveOk ? 'CUMPLE ✓' : 'A CALIBRAR ✗'}`,
+);
+console.log(
+  `[§7.1.10] Fracción de arena vacía emptyArenaFraction (zonas B–C, pisos >= 3): Mediana = ${formatPct(medEmptyFracBC)} (Obj: <= 10.0%) => ${critEmptyFracOk ? 'CUMPLE ✓' : 'A CALIBRAR ✗'}`,
 );
 console.log('================================================================\n');
