@@ -4,7 +4,7 @@
  * store (throttled) -> draws the arena. The store is the UI's read surface.
  */
 
-import { useEffect, useRef } from 'preact/hooks';
+import { useEffect, useRef, useState } from 'preact/hooks';
 import { ArenaRenderer } from './renderer/arena';
 import { audio } from './audio';
 import './renderer/arena.css';
@@ -16,6 +16,7 @@ import { StarterSelection } from './ui/components/StarterSelection';
 import { TeamBar } from './ui/components/TeamBar';
 import { BastionUpgrades } from './ui/components/BastionUpgrades';
 import { GameHUD } from './ui/components/GameHUD';
+import { bossGuardTarget } from './ui/bossGuard';
 import { GameOverModal } from './ui/components/GameOverModal';
 import { tickGame } from './core/gameLoop';
 import { TYPE_CHART } from './core/damage';
@@ -109,6 +110,16 @@ export default function App() {
 
   const phase = useGameStore((s) => s.phase);
   const gameState = useGameState();
+  // Game speed lives outside GameState: the loop reads it through a ref so the
+  // rAF effect never has to restart on a speed change.
+  const [speed, setSpeed] = useState<1 | 2 | 4>(1);
+  const speedRef = useRef(1);
+  useEffect(() => {
+    speedRef.current = speed;
+  }, [speed]);
+  // shortcut: session-only; promote to MetaState.settings.bossGuard in core/meta.ts + saveGame when a settings screen exists.
+  const [bossGuard, setBossGuard] = useState(true);
+  const bossGuardLatch = useRef(0);
   const metaLoaded = useMetaStore((s) => s.loaded);
   const rewards = useMetaStore((s) => s.rewards);
 
@@ -143,6 +154,22 @@ export default function App() {
       document.body.dataset.biome = 'RUTA_VERDE';
     }
   }, [gameState?.floor]);
+
+  // Boss guard: one-shot per boss floor — drops to 1x and cuts AUTO when the boss starts
+  // (or its breather begins). Resets OUTSIDE PLAYING so every run gets it again.
+  const inBreak = !!gameState?.awaitingNextWave || gameState?.interWaveTimerSec !== undefined;
+  useEffect(() => {
+    if (!gameState) return;
+    if (gameState.phase !== 'PLAYING') {
+      bossGuardLatch.current = 0;
+      return;
+    }
+    const target = bossGuardTarget(gameState.floor, inBreak, bossGuard, bossGuardLatch.current);
+    if (target === 0) return;
+    bossGuardLatch.current = target;
+    setSpeed(1);
+    if (gameState.autoAdvanceWave !== false) useGameStore.getState().requestSetAutoAdvance(false);
+  }, [gameState?.phase, gameState?.floor, gameState?.autoAdvanceWave, inBreak, bossGuard]);
 
   // Simulation loop: one rAF frame == one tickGame call + one draw.
   useEffect(() => {
@@ -257,14 +284,14 @@ export default function App() {
     // pasamos solo múltiplos exactos del paso fijo.
     let acc = 0;
     const frame = (now: number): void => {
-      acc = Math.min(acc + (now - last), STEP_MS * MAX_CATCHUP_STEPS);
+      acc = Math.min(acc + (now - last) * speedRef.current, STEP_MS * MAX_CATCHUP_STEPS * speedRef.current);
       last = now;
       const steps = Math.floor((acc + 0.001) / STEP_MS);
       acc -= steps * STEP_MS;
 
       if (stateRef.current.phase === 'PLAYING') {
         if (hold.active) {
-          if (now - hold.lastFire >= HOLD_FIRE_INTERVAL_MS) {
+          if (now - hold.lastFire >= HOLD_FIRE_INTERVAL_MS / speedRef.current) {
             hold.lastFire = now;
             store.requestClickAttack(hold.x, hold.y, false);
             audio.sfx('click');
@@ -280,7 +307,7 @@ export default function App() {
             }
             if (target) {
               const cps = AUTOCLICK_CPS_BY_LEVEL[autoclickLevel] ?? 1;
-              const autoInterval = 1000 / cps;
+              const autoInterval = 1000 / cps / speedRef.current;
               if (now - lastAutoClick >= autoInterval) {
                 lastAutoClick = now;
                 store.requestClickAttack(target.x, target.y, true);
@@ -367,11 +394,15 @@ export default function App() {
             <div class="game-sidebar-col-1 flex flex-col gap-4">
               <GameHUD
                 gameState={gameState}
+                speed={speed}
+                onSetSpeed={setSpeed}
                 onUltimate={() => useGameStore.getState().requestUltimate()}
                 onToggleAutoAdvance={() =>
                   useGameStore.getState().requestSetAutoAdvance(gameState.autoAdvanceWave === false)
                 }
                 onStartNextWave={() => useGameStore.getState().requestStartNextWave()}
+                bossGuard={bossGuard}
+                onToggleBossGuard={() => setBossGuard((v) => !v)}
               />
               <TeamBar
                 team={gameState.team}

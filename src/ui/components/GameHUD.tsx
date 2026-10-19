@@ -9,12 +9,18 @@ import { AudioToggle } from './AudioToggle';
 
 interface Props {
   gameState: GameState;
+  /** Simulation speed multiplier (1x / 2x / 4x); hidden when omitted. */
+  speed?: number;
+  onSetSpeed?: (speed: 1 | 2 | 4) => void;
   /** Fire the ultimate (also Space / right click). */
   onUltimate?: () => void;
   /** Flip auto-advance to the next floor after the breather. */
   onToggleAutoAdvance?: () => void;
   /** Spawn the next floor now (during the breather / manual wait). */
   onStartNextWave?: () => void;
+  /** Boss guard chip: drops to 1x + AUTO off when a boss floor starts (hidden when omitted). */
+  bossGuard?: boolean;
+  onToggleBossGuard?: () => void;
 }
 
 function formatClock(totalSec: number): string {
@@ -24,7 +30,16 @@ function formatClock(totalSec: number): string {
   return `${mm}:${ss}`;
 }
 
-export function GameHUD({ gameState, onUltimate, onToggleAutoAdvance, onStartNextWave }: Props) {
+export function GameHUD({
+  gameState,
+  speed,
+  onSetSpeed,
+  onUltimate,
+  onToggleAutoAdvance,
+  onStartNextWave,
+  bossGuard,
+  onToggleBossGuard,
+}: Props) {
   const activeSlot = gameState.team.find((s) => s.isActive && s.pokemon);
   const activePkm = activeSlot?.pokemon ?? null;
   const activeDef = activePkm ? POKEMON_REGISTRY[activePkm.definitionId] : null;
@@ -102,6 +117,36 @@ export function GameHUD({ gameState, onUltimate, onToggleAutoAdvance, onStartNex
               : 'SIGUIENTE PISO'
             : `PISO ${gameState.floor}`}
         </button>
+        {bossGuard !== undefined && onToggleBossGuard && (
+          <button
+            type="button"
+            onClick={onToggleBossGuard}
+            class={`pk-chip cursor-pointer ${bossGuard ? '' : 'opacity-60'}`}
+            style={{ background: bossGuard ? '#48c048' : '#585858' }}
+            title="Guardia de jefe: al empezar un piso de jefe baja a 1x y apaga AUTO (una vez por jefe)"
+          >
+            JEFE 1x
+          </button>
+        )}
+        {speed !== undefined && onSetSpeed && (
+          <div class="flex shrink-0 items-center gap-0 text-[9px]">
+            {([1, 2, 4] as const).map((s) => (
+              <button
+                key={s}
+                type="button"
+                onClick={() => onSetSpeed(s)}
+                class={`pk-chip cursor-pointer ${speed === s ? '' : 'opacity-60'}`}
+                style={{
+                  background: speed === s ? '#58b0f8' : '#585858',
+                  borderRadius: s === 1 ? '4px 0 0 4px' : s === 4 ? '0 4px 4px 0' : '0',
+                  borderRight: s !== 4 ? '1px solid #2858a8' : undefined,
+                }}
+              >
+                {s}x
+              </button>
+            ))}
+          </div>
+        )}
         <AudioToggle />
       </div>
 

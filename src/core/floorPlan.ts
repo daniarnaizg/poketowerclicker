@@ -93,6 +93,15 @@ export function buildFloorPlan(seed: number, floor: number): FloorPlan {
   const spawnWindowSec = floorSpawnWindowSec(floor);
   const baseAngle = rng() * TAU;
 
+  // Pincer spawns: 2 arms on floors 1-8, 3 on 9-16, 4 from 17 on, evenly spread
+  // around the arena so packs arrive from several directions at once.
+  const armCount = Math.min(4, 2 + Math.floor(Math.max(0, floor - 1) / 8));
+  const armAngles: number[] = [];
+  for (let a = 0; a < armCount; a++) {
+    const jitter = (rng() * 2 - 1) * SPAWN_ANGLE_JITTER_RAD;
+    armAngles.push(baseAngle + (a * TAU) / armCount + jitter);
+  }
+
   const k = packSizeForFloor(floor);
   const P = Math.ceil(totalEnemies / k);
 
@@ -103,8 +112,7 @@ export function buildFloorPlan(seed: number, floor: number): FloorPlan {
       j === 0
         ? 0
         : spawnWindowSec * Math.pow(j / Math.max(1, P - 1), SPAWN_TIME_EXPONENT);
-    const jitterJ = (rng() * 2 - 1) * SPAWN_ANGLE_JITTER_RAD;
-    const packAngle = baseAngle + j * GOLDEN_ANGLE_RAD + jitterJ;
+    const packAngle = armAngles[j % armCount];
     const sizeJ = j === P - 1 ? totalEnemies - k * (P - 1) : k;
 
     for (let m = 0; m < sizeJ; m++) {

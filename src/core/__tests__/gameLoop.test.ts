@@ -24,6 +24,7 @@ import {
   enemyHp,
   floorEnemyCount,
   floorSpawnWindowSec,
+  interWaveBreakSec,
   leakDamageForFloor,
 } from '../../config/balance.config';
 import { getEnemyDef } from '../../data/enemies';
@@ -176,7 +177,8 @@ describe('tickGame', () => {
     const cleared: GameState = { ...base, enemies: [], waveEnemiesRemaining: 0 };
     const inBreak = tickGame(cleared, {}, config, 16.7, mulberry32(22));
     expect(inBreak.floor).toBe(1);
-    expect(inBreak.interWaveTimerSec).toBeCloseTo(INTER_WAVE_BREAK_SEC - 1 / 60, 5);
+    expect(inBreak.interWaveTimerSec).toBeCloseTo(interWaveBreakSec(1) - 1 / 60, 5);
+    expect(INTER_WAVE_BREAK_SEC).toBe(0.6);
     expect(inBreak.enemies).toHaveLength(0);
 
     const next = ticks(inBreak, 60 * 3);
@@ -188,6 +190,109 @@ describe('tickGame', () => {
         next.enemies.filter((e) => e.alive).length,
     );
     expect(next.waveEnemiesRemaining).toBe(floorEnemyCount(2));
+  });
+
+  /** Floor state whose spawn schedule is already exhausted (all events consumed). */
+  const consumedFloorState = (
+    base: GameState,
+    floor: number,
+    enemies: Enemy[],
+  ): GameState => ({
+    ...base,
+    floor,
+    enemies,
+    waveEnemiesRemaining: enemies.filter((e) => e.alive).length,
+    floorRuntime: {
+      ...base.floorRuntime!,
+      plan: { ...base.floorRuntime!.plan, events: [] },
+      nextEventIdx: 0,
+      elapsedSec: 0,
+    },
+    interWaveTimerSec: undefined,
+    awaitingNextWave: false,
+  });
+
+  it('overlaps waves from floor 10: advances once the spawn schedule is consumed, with stragglers still alive', () => {
+    // Floor 10 itself is a boss floor, so the first overlapping floor is 11.
+    const base = startingRun(21);
+    const straggler: Enemy = {
+      ...base.enemies[0],
+      id: 98765,
+      hp: 1e9,
+      maxHp: 1e9,
+      speed: 0,
+      alive: true,
+    };
+    const state = consumedFloorState(base, 11, [straggler]);
+
+    const next = tickGame(state, {}, config, 16.7, mulberry32(7));
+
+    expect(next.floor).toBe(12);
+    expect(next.interWaveTimerSec).toBeUndefined();
+    // The straggler is merged in, not replaced by the new floor's initial enemies.
+    const alive = next.enemies.filter((e) => e.alive);
+    expect(alive.some((e) => e.id === 98765)).toBe(true);
+    expect(alive.length).toBeGreaterThan(1);
+    expect(next.waveEnemiesRemaining).toBe(
+      next.floorRuntime!.plan.events.length - next.floorRuntime!.nextEventIdx + alive.length,
+    );
+  });
+
+  it('keeps the straggler ids intact when merging into the next floor', () => {
+    const base = startingRun(21);
+    const stragglerIds = [1, 2];
+    const stragglers: Enemy[] = stragglerIds.map((id) => ({
+      ...base.enemies[0],
+      id,
+      hp: 1e9,
+      maxHp: 1e9,
+      speed: 0,
+      alive: true,
+    }));
+    const state = consumedFloorState(base, 13, stragglers);
+
+    const next = tickGame(state, {}, config, 16.7, mulberry32(8));
+
+    expect(next.floor).toBe(14);
+    const ids = next.enemies.filter((e) => e.alive).map((e) => e.id);
+    for (const id of stragglerIds) expect(ids).toContain(id);
+    // Fresh ids for the new floor never collide with the carried-over ones.
+    expect(new Set(ids).size).toBe(ids.length);
+    const freshIds = ids.filter((id) => !stragglerIds.includes(id));
+    expect(freshIds.length).toBeGreaterThan(0);
+    for (const id of freshIds) expect(id).toBeGreaterThanOrEqual(base.nextEntityId!);
+  });
+
+  it('boss floors still require a full clear before the breather starts', () => {
+    const base = startingRun(31);
+    const boss: Enemy = {
+      ...base.enemies[0],
+      id: 555,
+      isBoss: true,
+      kind: 'miniboss',
+      bossPhase: 1,
+      hp: 1e9,
+      maxHp: 1e9,
+      speed: 0,
+      alive: true,
+      bossTimerSec: 30,
+    };
+    const state = consumedFloorState(base, 10, [boss]);
+
+    const next = tickGame(state, {}, config, 16.7, mulberry32(9));
+
+    expect(next.phase).toBe('PLAYING');
+    expect(next.floor).toBe(10);
+    expect(next.interWaveTimerSec).toBeUndefined();
+    expect(next.awaitingNextWave).toBe(false);
+    expect(next.enemies.some((e) => e.id === 555 && e.alive)).toBe(true);
+  });
+
+  it('interWaveBreakSec is 0.6 on floors 1-9 and 0 from floor 10 on', () => {
+    expect(interWaveBreakSec(1)).toBe(0.6);
+    expect(interWaveBreakSec(9)).toBe(0.6);
+    expect(interWaveBreakSec(10)).toBe(0);
+    expect(interWaveBreakSec(50)).toBe(0);
   });
 
   it('waits for the player when auto-advance is off', () => {

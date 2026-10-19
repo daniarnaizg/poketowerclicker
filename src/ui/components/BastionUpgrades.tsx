@@ -4,7 +4,6 @@
 
 import {
   ARROW_DAMAGE_PER_LEVEL,
-  AUTOCLICK_CPS_BY_LEVEL,
   AUTO_SPD_BASE_MULT,
   CRIT_CHANCE_PER_UP_CRIT,
   GOLD_PER_LEVEL,
@@ -67,14 +66,13 @@ export function BastionUpgrades({ upgrades, gold, teamLevel, onPurchase, onBuyTe
         class="grid min-h-0 flex-1 grid-cols-2 content-start gap-2 overflow-y-auto overflow-x-hidden pb-2 pr-1"
         style={{ scrollbarWidth: 'thin' }}
       >
-        {BASTION_UPGRADE_IDS.map((id) => {
+        {BASTION_UPGRADE_IDS.filter((id) => id !== 'UP_AUTOCLICK' && id !== 'UP_ARROW').map((id) => {
           const level = upgrades[id] ?? 0;
           const maxLevel = upgradeMaxLevel(id);
           const isMax = maxLevel !== undefined && level >= maxLevel;
           const barCap = maxLevel ?? LEVEL_BAR_MAX;
           const cost = upgradeCost(id, level);
           const info = UPGRADE_INFO[id];
-          const cps = AUTOCLICK_CPS_BY_LEVEL[level] ?? 0;
           return (
             <button
               key={id}
@@ -100,11 +98,6 @@ export function BastionUpgrades({ upgrades, gold, teamLevel, onPurchase, onBuyTe
                   )}
                 </span>
               </span>
-              {id === 'UP_AUTOCLICK' && (
-                <span class="text-[9px] text-[#555]">
-                  {cps} clics/s
-                </span>
-              )}
               {id === 'UP_MULTI' && (
                 <span class="text-[9px] text-[#555]">
                   {1 + level} disp. auto
