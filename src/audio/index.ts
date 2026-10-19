@@ -4,7 +4,7 @@
 
 import { Sequencer } from './bgm';
 import * as engine from './engine';
-import { detectAudioEvents, sceneFor } from './events';
+import { detectAudioEvents, sceneFor, SILENT_EVENTS } from './events';
 import type { AudioEvent } from './events';
 import { SFX, SFX_MIN_GAP_MS } from './sfx';
 import type { SfxName } from './sfx';
@@ -91,7 +91,9 @@ export const audio = {
   observe(prev: GameState | null, next: GameState): void {
     this.setScene(sceneFor(next));
     for (const ev of detectAudioEvents(prev, next)) {
+      if (SILENT_EVENTS.has(ev.type)) continue;
       switch (ev.type) {
+        case 'hit': playSfx('hit'); break;
         case 'kill': playSfx('kill'); break;
         case 'hurt': playSfx('hurt'); break;
         case 'ultimate': playSfx('ultimate'); break;

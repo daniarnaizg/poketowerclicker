@@ -8,6 +8,7 @@ import { midiToFreq, noise, tone } from './engine';
 
 export type SfxName =
   | 'click'
+  | 'hit'
   | 'kill'
   | 'hurt'
   | 'ultimate'
@@ -35,6 +36,11 @@ export const SFX: Record<SfxName, Player> = {
     noise(c, d, { t, dur: 0.025, vol: 0.035, filter: 'highpass', f0: 5000 });
   },
 
+  /** Impacto de daño a enemigo: tic muy sutil. */
+  hit(c, d, t, v) {
+    tone(c, d, { wave: 'pulse12', freq: 900 + v * 250, to: 600, t, dur: 0.03, vol: 0.022 });
+  },
+
   /** Enemigo derrotado: caída de tono tipo "faint" + chasquido. */
   kill(c, d, t, v) {
     tone(c, d, { wave: 'square', freq: 520 + v * 120, to: 130, t, dur: 0.14, vol: 0.085 });
@@ -43,8 +49,8 @@ export const SFX: Record<SfxName, Player> = {
 
   /** El Bastión recibe daño: golpe grave. */
   hurt(c, d, t) {
-    tone(c, d, { wave: 'triangle', freq: 170, to: 52, t, dur: 0.24, vol: 0.24 });
-    noise(c, d, { t, dur: 0.2, vol: 0.14, filter: 'lowpass', f0: 1000, f1: 140 });
+    tone(c, d, { wave: 'triangle', freq: 170, to: 52, t, dur: 0.12, vol: 0.07 });
+    noise(c, d, { t, dur: 0.10, vol: 0.04, filter: 'lowpass', f0: 1000, f1: 140 });
   },
 
   /** Definitiva: barrido ascendente + acorde brillante. */
@@ -59,10 +65,10 @@ export const SFX: Record<SfxName, Player> = {
 
   /** Cambio de Pokémon: "pop" de Poké Ball + destellos. */
   swap(c, d, t) {
-    tone(c, d, { wave: 'sine', freq: 380, to: 1500, t, dur: 0.1, vol: 0.13 });
-    tone(c, d, { wave: 'pulse12', freq: 1568, t: t + 0.09, dur: 0.05, vol: 0.07 });
-    tone(c, d, { wave: 'pulse12', freq: 2093, t: t + 0.13, dur: 0.08, vol: 0.06 });
-    noise(c, d, { t, dur: 0.06, vol: 0.05, filter: 'highpass', f0: 4000 });
+    tone(c, d, { wave: 'sine', freq: 380, to: 1500, t, dur: 0.1, vol: 0.065 });
+    tone(c, d, { wave: 'pulse12', freq: 1568, t: t + 0.09, dur: 0.05, vol: 0.035 });
+    tone(c, d, { wave: 'pulse12', freq: 2093, t: t + 0.13, dur: 0.08, vol: 0.03 });
+    noise(c, d, { t, dur: 0.06, vol: 0.025, filter: 'highpass', f0: 4000 });
   },
 
   /** Piso superado: arpegio mayor ascendente. */
@@ -91,7 +97,7 @@ export const SFX: Record<SfxName, Player> = {
         freq: f(m),
         t: t + i * 0.065,
         dur: last ? 0.34 : 0.08,
-        vol: 0.1,
+        vol: 0.05,
         release: last ? 0.2 : 0.02,
         vibrato: last ? [7, 18] : undefined,
       });
@@ -100,8 +106,8 @@ export const SFX: Record<SfxName, Player> = {
 
   /** Compra de mejora: "ding" de moneda. */
   buy(c, d, t) {
-    tone(c, d, { wave: 'pulse25', freq: f(B5), t, dur: 0.05, vol: 0.1 });
-    tone(c, d, { wave: 'pulse25', freq: f(E6), t: t + 0.05, dur: 0.18, vol: 0.1, release: 0.12 });
+    tone(c, d, { wave: 'pulse25', freq: f(B5), t, dur: 0.05, vol: 0.05 });
+    tone(c, d, { wave: 'pulse25', freq: f(E6), t: t + 0.05, dur: 0.18, vol: 0.05, release: 0.12 });
   },
 
   /** Botón de interfaz. */
@@ -138,8 +144,9 @@ export const SFX: Record<SfxName, Player> = {
 /** Separación mínima entre dos reproducciones del mismo efecto (ms). */
 export const SFX_MIN_GAP_MS: Record<SfxName, number> = {
   click: 45,
+  hit: 140,
   kill: 55,
-  hurt: 160,
+  hurt: 350,
   ultimate: 300,
   swap: 120,
   floor: 400,
