@@ -1,10 +1,10 @@
-# PRD: PokéBastion — Pokémon Idle Defense & Gacha (v2.6)
+# PRD: PokéBastion — Pokémon Idle Defense & Gacha (v2.7)
 
 Documento de Requisitos de Producto para un juego de defensa e incremento progresivo (*Roguelite Idle Defense*) con mecánicas gacha, rotación táctica elemental en tiempo real, vitalidad individual por Pokémon, paradas de ruta y arena simétrica.
 
 | Atributo | Detalle |
 | --- | --- |
-| **Estado del Documento** | Borrador Consolidado (v2.6) — Fase 1, Fase 2 y fundaciones de Fase 3A completadas (`HEAD 89abb76`) · Rediseño de **Vitalidad Individual y Paradas** integrado (bloques `3A.2-V`, `3A.2-P`) · Bloque `3A.5` (Spawner continuo, ritmo de piso y Jefes por fases) pendiente, previo a `3A.2-S` |
+| **Estado del Documento** | Borrador Consolidado (v2.7) — Fase 1, Fase 2 y fundaciones de Fase 3A completadas (`HEAD 89abb76`) · Rediseño de **Vitalidad Individual y Paradas** integrado (bloques `3A.2-V`, `3A.2-P`) · Spawner continuo en paquetes (D29), aceleración de reloj ante arena limpia (D30), audio sutil (D31) y calibración v3 consolidados |
 | **Plataforma** | Web App (Desktop & Mobile PWA) — 100% Client-Side Execution |
 | **Tooling & Build** | **Vite** + **pnpm** + **TypeScript** |
 | **UI & Estado** | **Preact** (o React) + **Tailwind CSS** + **Zustand** |
@@ -303,18 +303,24 @@ export interface ShopState {
 
 ## 5. Estructura de Pisos, Jefes (10 / 50 / 100) y Modos de Juego
 
-### 5.1. Jerarquía de Pisos, Paradas y Anclaje de Jefes (Decisiones D1 y D11)
+### 5.1. Jerarquía de Pisos, Paradas y Anclaje de Jefes (Decisiones D1, D11, D29, D30)
 
 | Tipo de Piso / Evento | Pisos | Características del Encuentro |
 | :--- | :--- | :--- |
-| **Oleada Normal** | Pisos regulares (no múltiplos de 10 ni exigentes) | Flujo continuo de `N(f)` enemigos en ventana `S(f)` (≈60 s, ventana de spawn 40–55 s + cola de limpieza) avanzando en 360°, con tope de vivos simultáneos `ALIVE_CAP = 70`. |
-| **Piso Exigente** | `f % 5 === 4` (no jefe: 4, 9, 14, 19, 24…) | Flujo intensificado previo a Parada o Jefe: `N_hard = 1,4*N`, `S_hard = 1,5*S` (duración ≈75–95 s), ráfagas concentradas con tope `ALIVE_CAP = 70`. |
+| **Oleada Normal** | Pisos regulares (no múltiplos de 10 ni exigentes) | Flujo continuo en paquetes de $N(f) = \text{clamp}(\text{round}(14 + 1.4 \cdot f), 16, 110)$ enemigos en ventana $S(f) = \min(45, 32 + 0.25 \cdot f)$ (en Torre $f > 100$: $\max(30, 45 - 0.1 \cdot (f - 100))$). Enemigos agrupados en paquetes de tamaño $k = \text{packSizeForFloor}(f) = \text{clamp}(4 + \lfloor f/3 \rfloor, 3, 8)$ con $\text{PACK\_STAGGER\_SEC} = 0.35\text{ s}$ y $\text{PACK\_SPREAD\_RAD} = 0.18\text{ rad}$. Tope de vivos simultáneos $\text{ALIVE\_CAP} = 70$. Aceleración de reloj a `FLOOR_CLOCK_BOOST = 2.5x` cuando en la arena quedan $\le 1$ enemigos normales vivos. |
+| **Piso Exigente** | `f % 5 === 4` (no jefe: 4, 9, 14, 19, 24…) | Flujo intensificado previo a Parada o Jefe: $N \times 1.4$, ventana $S \times 1.15$, tamaño de paquete $+ 2$ (hasta tope 8), ráfagas concentradas con tope $\text{ALIVE\_CAP} = 70$. |
 | **Parada de Ruta** | **Cada 10 pisos desde el piso 5** (5, 15, 25, 35, 45…) | Pausa táctica a mitad de cada ciclo con Informe de Ruta (incluyendo el jefe del piso `f + 5`) y menú de 1 acción (`HEAL_ONE`, `HEAL_TEAM`, `REVIVE_ONE`, §4.4.4). |
 | **Mini-Boss** | **Cada 10 pisos** (10, 20, 30, 40, 60, 70, 80, 90...) | Jefe de zona con HP por TTK (`bossHp(f) = BOSS_POOL_FACTOR * N(f) * enemyHp(f)` con `BOSS_POOL_FACTOR = 0.6`), cronómetro de **30 s** con `BOSS_TIMER_MODE` (`'enrage'` por defecto), 3 fases de combate (umbrales 66% y 33%) con recorte de daño, 1,5 s de invulnerabilidad entre fases, invocación de adds (6 en fase 2, 8 en fase 3) y flujo ligero de acompañamiento. Se ancla al perímetro central y golpea al activo según la fase (§4.4.2). Otorga botín y Sellos Gacha al ser **abatido** por primera vez. |
 | **Gran Boss (Major Boss)** | **Pisos 50 y 100** (y cada 50 pisos en la Torre: 150, 200, 250…) | Jefes principales de hito con HP por TTK (`BOSS_POOL_FACTOR = 1.2`), cronómetro de **45 s** (piso 50) y **60 s** (piso 100) con `BOSS_TIMER_MODE` (`'enrage'`), 3 fases con recorte de daño e invulnerabilidad 1,5 s, adds, flujo ligero, anclaje escalado y cambio de fase elemental (§9.5) que exigen rotación táctica activa. |
 
+* **Ritmo de Oleadas y Paquetes de Enemigos (Decisiones D20, D29, D30):**
+  * **Paquetes de enemigos:** los enemigos no aparecen en un goteo uniforme de 1 en 1, sino agrupados en paquetes de tamaño $k = \text{packSizeForFloor}(f) = \text{clamp}(4 + \lfloor f / 3 \rfloor, 3, 8)$ (con $+2$ adicional en pisos exigentes hasta tope 8; en pisos de jefe el acompañamiento usa paquetes fijos de 2). Dentro de cada paquete, los enemigos se escalonan temporalmente a razón de $\text{PACK\_STAGGER\_SEC} = 0.35\text{ s}$ y con una dispersión angular de $\text{PACK\_SPREAD\_RAD} = 0.18\text{ rad}$ respecto al ángulo base del paquete, generando frentes compactos y legibles.
+  * **Fórmula de conteo:** $N(f) = \text{clamp}(\text{round}(14 + 1.4 \cdot f), 16, 110)$.
+  * **Ventana de spawn:** $S(f) = \min(45, 32 + 0.25 \cdot f)$ (en la Torre $f > 100$: $\max(30, 45 - 0.1 \cdot (f - 100))$).
+  * **Aceleración de reloj (Arena limpia):** cuando en la arena quedan $\le 1$ enemigos normales vivos (`FLOOR_CLOCK_BOOST_MAX_ALIVE = 1`), el reloj de piso avanza a `FLOOR_CLOCK_BOOST = 2.5x` para acelerar el vaciado de la cola de spawn y eliminar tiempos muertos cuando el jugador tiene daño de sobra.
+  * **Pisos exigentes (`f % 5 === 4`, no jefe):** cuentan con $N \times 1.4$ enemigos (`HARD_FLOOR_ENEMY_MULT = 1.4`), ventana de spawn $S \times 1.15$ (`HARD_FLOOR_WINDOW_MULT = 1.15`) y tamaño de paquete $+ 2$ (`HARD_FLOOR_PACK_BONUS = 2`), intensificando la presión antes de Paradas o Jefes.
+  * **Pausa entre pisos:** `INTER_WAVE_BREAK_SEC = 1.5s` de respiro entre la eliminación del último enemigo y el inicio de la siguiente oleada (sustituye el valor previo de 2,75 s). La carga de Definitiva continúa acumulándose durante esta pausa (**no existe regeneración de HP**) antes de activar el siguiente piso o abrir la Parada de Ruta (`f >= 5 && (f - 5) % 10 === 0`). El jugador puede adelantarla manualmente con *Siguiente Piso* o congelar el avance desactivando *AUTO*.
 * **Mecánica de Anclaje de Jefe (Decisiones D1, D7/D8, D26–D28):** Un jefe (Mini-Boss o Gran Boss) **nunca se autodestruye ni cuenta como "fuga" al tocar el centro**. Cuando alcanza `BASTION_DAMAGE_R` (24 px del centro), se detiene en el perímetro y **golpea periódicamente al Pokémon activo** con la fracción de vida y cadencia escalada de su fase actual (5% / 1,00 s en Fase 1; 7% / 0,85 s en Fase 2; 9% / 0,70 s en Fase 3, multiplicados por efectividad de tipos y mitigación; ver tabla por fase en §4.4.2) mientras el cronómetro de jefe sigue corriendo. Si el golpe debilita al Pokémon activo, se ejecuta el **Relevo Forzado** (D16) y el jefe continúa golpeando al nuevo activo. El fin del combate se rige por `BOSS_TIMER_MODE`: en `'enrage'` (por defecto), agotar el reloj enfurece al jefe (+50% daño cada 10 s) y la run solo concluye por `teamWiped`; en `'gameover'`, agotar el reloj provoca derrota inmediata. Superar el piso de jefe (y registrar su primera victoria para Sellos en `settleRun`) exige **reducir su HP a 0**.
-* **Respiro entre oleadas:** al limpiar un piso el siguiente no aparece de golpe: hay **2,75 s de respiro** (la carga de Definitiva sigue corriendo; **no existe regeneración de HP**) antes de invocar el nuevo piso (o de abrir la Parada si el siguiente piso cumple `f >= 5 && (f - 5) % 10 === 0`). El jugador puede adelantarlo con el botón *Siguiente Piso* o desactivar el avance automático con el chip *AUTO* para esperar de forma indefinida.
 
 ### 5.2. Modo Campaña / Expedición por Biomas
 
@@ -400,7 +406,7 @@ export interface ShopState {
   ```
 * **Comprobación Serverless Rápida (<5 ms)**:
   1. **Consistencia de Oro:** Verifica que el oro total ganado coincida matemáticamente con las 7 mejoras compradas, los niveles de equipo, **los servicios adquiridos en Paradas (`shop_log`, cuyos precios máximos están acotados por $W(\text{piso})$ y el escalado $\times 1,25^{\text{revives}}$)** más el saldo final.
-  2. **Umbral Fisiológico de Tiempo:** Comprueba que la duración de la run no sea inferior al tiempo físico mínimo requerido: dado que el spawner emite enemigos a lo largo de la ventana temporal `S(f)`, un piso no puede completarse antes de `S(f)` ⇒ cota mínima de duración de run $\ge \sum S(f)$ más los respiros entre oleadas (mejora anti-trampa).
+  2. **Umbral Fisiológico de Tiempo:** Comprueba que la duración de la run no sea inferior al tiempo físico mínimo requerido: dado que el spawner emite enemigos a lo largo de la ventana temporal `S(f)` y que cuando en la arena quedan $\le 1$ enemigos normales vivos el reloj de piso avanza acelerado a `FLOOR_CLOCK_BOOST = 2.5x`, la cota mínima de duración considera la aceleración de reloj: $\ge \sum S(f) / \text{FLOOR\_CLOCK\_BOOST}$ más los respiros entre oleadas (`INTER_WAVE_BREAK_SEC = 1.5s`) (mejora anti-trampa).
   3. **DPS Sanity Check:** Comprueba que el DPS teórico máximo de ese equipo y mejoras (separando `manual_clicks` y `auto_clicks` según la cota de cadencia de `UP_AUTOCLICK`) pueda eliminar al jefe del `final_floor` dentro de su temporizador considerando su TTK mínimo y las pausas de invulnerabilidad (1,5 s por cambio de fase) entre las 3 fases del jefe. La cota usa los **topes por categoría** del pipeline de modificadores (§9.3.1) y un presupuesto máximo de oro por fugitivos de botín (§9.6).
   4. **Reconstrucción determinista:** clima, terreno, mutadores, informe de ruta y eventos especiales son funciones puras de `(seed, bioma, piso)` (§9.1.1, §9.3.5); el servidor los recalcula con el mismo código (el menú de Parada es fijo y no consume RNG, D19). El payload añade `mode`, `autoSwap` y `schemaVersion`.
 * La función serverless importa las mismas fórmulas matemáticas de `src/core/damage.ts` garantizando consistencia absoluta sin duplicar código.
@@ -727,13 +733,13 @@ Con el nuevo modelo de spawner continuo (Fase 3A.5), la dificultad se estructura
 | Zona | Rango | Qué debe sentirse | Métricas objetivo (perfil "intermedio", calibrar en WP7) |
 | :--- | :--- | :--- | :--- |
 | **A · Tensión** | $1 \dots 0,15 \cdot F_{\text{end}}$ | Cuesta: casi no hay inversión. Un equipo fuerte o con pasivas activas la acorta. | Fracción de fugas $\phi \in [5\%, 20\%]$; cola de limpieza 10–25 s; duración de piso 55–80 s. Con build fuerte (equipo 3★–4★), $\phi \le 5\%$ en pisos 1–5. |
-| **B · Dominio** | $0,15 \dots 0,55 \cdot F_{\text{end}}$ | "Destruyes cada oleada". | $\phi \le 3\%$; cola $\le 5\text{ s}$; duración $\approx$ ventana de spawn (45–65 s). |
+| **B · Dominio** | $0,15 \dots 0,55 \cdot F_{\text{end}}$ | "Destruyes cada oleada". | $\phi \le 3\%$; cola $\le 5\text{ s}$; duración mediana de piso normal en **28–45 s**; densidad `meanAlive` mediana $\ge 2.8$ (picos hasta 17 vivos); fracción de arena vacía `emptyArenaFraction` mediana $\le 10\%$. |
 | **C · Presión** | $0,55 \dots 0,85 \cdot F_{\text{end}}$ | Falta daño; cada clic y decisión cuenta. | $\phi$ sube de $3\%$ a $15\%$; cola 5→25 s; **el bot de 4 clics/s llega $\ge +15\%$ pisos más lejos que el de 0 clics con la misma build**. |
 | **D · Colapso** | $> 0,85 \cdot F_{\text{end}}$ | Se acumulan fugas, cae el primer Pokémon, la run termina. | $\phi > 25\%$; tras el primer KO, fin de run en $\le 2$ bloques con probabilidad $\le 60\%$ (criterio 4). |
 
 *Nota:* $\phi = \text{bajas por fuga} / N(f)$ (fracción de la horda).
 
-**Los 12 Criterios de Aceptación del Simulador v3 (`pnpm run test:balance`):**
+**Los Criterios de Aceptación del Simulador v3 (`pnpm run test:balance`):**
 1. **La Parada importa:** `SMART` supera a `NO_SHOP` en piso mediano y en jefes abatidos con un margen **≥ 15%** *(ajustable)* en los perfiles intermedio y máximo, y `SMART` obtiene un resultado $\ge$ cualquier política fija (`HEAL_FIRST`, `REVIVE_FIRST`).
 2. **Anti carry único:** Con el mismo presupuesto de equipo y mejoras, `CARRY` queda **≥ 15% por debajo** de `ROTATE` en piso mediano.
 3. **Presión sana por bloque:** En el perfil intermedio, el equipo llega a cada Parada con un HP medio del **40–70%** y **≤ 1 Pokémon debilitado** en la mayoría de paradas; un perfil pasivo (que no releva a tiempo) llega con ≥ 2 debilitados.
@@ -751,7 +757,10 @@ Con el nuevo modelo de spawner continuo (Fase 3A.5), la dificultad se estructura
 
 6. **Determinismo de Parada e Informe de Ruta:** Misma `seed` ⇒ mismas oleadas, mismos Informes de Ruta y mismas Paradas aunque el jugador tome decisiones distintas en cada parada.
 7. **Cero curas fuera de Parada:** Test automatizado que recorre 10 000 ticks de combate verificando que $\sum \text{hp}$ nunca sube salvo al procesar un `shopAction` (o en una subida de nivel / evolución, donde el ratio `hp/maxHp` permanece invariante).
-8. **Arco por zonas y duración de piso:** El perfil intermedio cumple rigurosamente las métricas de las zonas A, B, C y D. La duración mediana de un piso normal en zona B se sitúa en **50–70 s**; los pisos exigentes (`f % 5 === 4`) duran **75–95 s**; una run completa de 100 pisos del perfil máximo se completa en $\le 2,2\text{ h}$.
+8. **Arco por zonas, duración y calibración de ritmo (v2.7):**
+   * **Criterio de duración mediana de piso en Zona B:** 28–45 s (duración mediana de piso normal con aceleración `FLOOR_CLOCK_BOOST = 2.5x` cuando en la arena quedan $\le 1$ enemigos normales vivos); una run completa de 100 pisos del perfil máximo se completa en $\le 2,2\text{ h}$.
+   * **Criterio de densidad `meanAlive`:** Mediana $\ge 2.8$ (con picos hasta 17 vivos observados en combate de zonas B y C, pisos $\ge 3$).
+   * **Criterio de arena vacía `emptyArenaFraction`:** Mediana $\le 10\%$ (fracción de ticks con arena vacía durante la ventana de spawn en zonas B y C, pisos $\ge 3$).
 9. **El clic y la habilidad importan:** En zona C de presión, un bot de 4 clics/s con puntería alcanza $\ge \mathbf{+15\%}$ pisos adicionales frente a un bot de 0 clics con la misma composición y build.
 10. **Anti-one-shot en Jefes:** Una Definitiva quita $\le 25\%$ del `maxHp` del jefe (mediana) y $\le 40\%$ (p95 con crítico); el combate dura $\ge 8\text{ s}$ (Mini-Boss) y $\ge 15\text{ s}$ (Gran Boss) en perfil intermedio. Para cualquier equipo extremo, ninguna instancia individual de daño salta más de una fase.
 11. **Peligro real del combate de jefe:** El combate cuesta entre **$0,5$ y $1,0 \times$ el `maxHp` medio del Pokémon** en perfil intermedio; si se ignora el relevo táctico (`CARRY`), el Pokémon activo muere en $<10\text{ s}$ durante la fase 3.
@@ -1100,7 +1109,7 @@ Para que no sea un trampolín a la oscilación ni sustituya al jugador:
 | Suma de modificadores desbordada | Rompe balance y validación | Pipeline con topes por categoría (§9.3.1). |
 | Sinergias monotipo dominantes | Contradice el pilar "equipo de 6 equilibrado" | Sinergia de Cobertura + criterio ±15% (§9.4). |
 
-**Decisiones de diseño confirmadas (v2.3 a v2.6)**
+**Decisiones de diseño confirmadas (v2.3 a v2.7)**
 
 | # | Pregunta / Decisión | Resolución confirmada |
 | :--- | :--- | :--- |
@@ -1127,15 +1136,18 @@ Para que no sea un trampolín a la oscilación ni sustituya al jugador:
 | **D15** | **¿Qué pasa con `UP_HP` y `UP_WALL`?** | **Confirmado (Se eliminan ambas mejoras)** — El `maxHp` de los Pokémon sube automáticamente con el **Nivel de Equipo** (y evoluciones/pasivas `MAX_HP`), quedando **7 mejoras con oro** en el panel. |
 | **D16** | **¿Qué ocurre en el instante en que cae el Pokémon activo?** | **Confirmado (Relevo Forzado)** — Entra automáticamente el mejor candidato vivo (`swapScore`), sin cooldown y disparando su Ataque de Entrada. Si no queda ninguno ⇒ `GAME_OVER`. |
 | **D17–D19** | **¿Cementerio en Ficha de Entrenador, Informe de Ruta en Parada y `shopLog` en `RunProof`?** | **Confirmado (Sí a los tres)** — `faintLog` en el resumen de derrota, `previewWave` puro en el modal de Parada y `shop_log` en `RunProof` sin consumir RNG. |
-| **D20** | **¿Cómo se generan los enemigos en el piso?** | **Confirmado (Flujo continuo $N(f)$ en ventana $S(f)$)** — Una oleada deja de ser un pulso de 10 enemigos. Cada piso normal es un flujo continuo determinista gobernado por `buildFloorPlan(seed, floor)` con $N(f) = \text{clamp}(\text{round}(8 + 1,0 \cdot f), 9, 110)$ y $S(f) = \min(55, 40 + 0,15 \cdot f)$. |
+| **D20** | **¿Cómo se generan los enemigos en el piso?** | **Confirmado (Flujo continuo $N(f)$ en ventana $S(f)$ y paquetes)** — Una oleada deja de ser un pulso de 10 enemigos. Cada piso normal es un flujo continuo determinista gobernado por `buildFloorPlan(seed, floor)` con $N(f) = \text{clamp}(\text{round}(14 + 1.4 \cdot f), 16, 110)$ y $S(f) = \min(45, 32 + 0.25 \cdot f)$, agrupados en paquetes de tamaño $k$ (D29). |
 | **D21** | **¿Existe un límite de enemigos vivos simultáneos en arena?** | **Confirmado (`ALIVE_CAP = 70`)** — Tope estricto de enemigos simultáneos (arena 384 px, sprites a 48 px). Los eventos de spawn que excedan el tope se retienen en cola sin descartarse ni perderse. La dificultad escala por densidad y estadísticas, nunca por cantidad ilimitada de entidades. |
-| **D22** | **¿Cuál es la duración objetivo de un piso y de una run?** | **Confirmado (Piso normal ≈60 s, exigente ≈75–95 s)** — Pisos exigentes (`f % 5 === 4`, antes de Parada y de Jefe) con $N \times 1,4$ y $S \times 1,5$. Run completa de 100 pisos ≈ 1,7–2 h. |
+| **D22** | **¿Cuál es la duración objetivo de un piso y de una run?** | **Confirmado (Piso normal Zona B 28–45 s por D30)** — Con la aceleración de reloj `FLOOR_CLOCK_BOOST = 2.5x` (D30), la duración mediana en Zona B se sitúa en 28–45 s; pisos exigentes (`f % 5 === 4`) con $N \times 1,4$, $S \times 1,15$ y tamaño de paquete $+2$. Run completa de 100 pisos ≈ 1,5–2 h. |
 | **D23** | **¿Cuál es el invariante económico del juego?** | **Confirmado ($W(f)$ como invariante por piso)** — El ingreso total del piso $W(f) = 10 \times \text{enemyGoldValue}(f)$ es el invariante económico, no el oro por enemigo. `oro por enemigo = W(f) / N(f)`. Precios de Parada y recompensas de fugitivos se expresan siempre en $W$. |
 | **D24** | **¿Cómo se calibra el daño de fuga?** | **Confirmado (Fracción de la horda `LEAK_KILL_FRACTION = 0.30`)** — Sustituye al antiguo invariante de "≈7 fugas fijas". `leakDamage(f) = maxHpRef(f) / (LEAK_KILL_FRACTION * N(f))`. |
 | **D25** | **¿Cómo se calcula el HP de los jefes?** | **Confirmado (HP por TTK objetivo)** — `bossHp(f) = BOSS_POOL_FACTOR * N(f) * enemyHp(f)` (factor `0.6` miniboss, `1.2` gran boss). Se calibra para un TTK de 15–20 s (mini), 25–30 s (Gran Boss 50) y 40–45 s (Gran Boss 100). |
 | **D26** | **¿Tienen fases todos los jefes y cómo se evita el one-shot?** | **Confirmado (3 fases 66% / 33% con recorte de HP)** — Centralizado en `applyDamageToEnemy`. Si un daño cruzaría un umbral, el HP se recorta exactamente al umbral (el exceso se descarta). 1,5 s de invulnerabilidad con reloj y `elapsedSec` en pausa. Ninguna Definitiva salta fases. |
 | **D27** | **¿Cómo escalan las fases de jefe y qué aportan los adds?** | **Confirmado (Escalado de anclaje + invocación de adds)** — Cada fase acelera y endurece el anclaje (5%/1,0s, 7%/0,85s, 9%/0,7s) e invoca adds (`0 / 6 / 8`) a través del spawner (cola, 0 oro, desaparecen al morir el jefe). Flujo ligero $0,4 \cdot N(f)$ en la arena. |
 | **D28** | **¿Cómo se comporta el temporizador de jefe al llegar a 0?** | **Confirmado (`BOSS_TIMER_MODE: 'enrage'` por defecto)** — Modo configurable `'gameover' | 'enrage'`. Por defecto en `'enrage'`: al agotarse el reloj el jefe enfurece (+50% daño cada 10 s acumulativo), terminando la run siempre de forma orgánica por `teamWiped`. |
+| **D29** | **¿Cómo se estructuran los enemigos para generar densidad y evitar un goteo plano?** | **Confirmado (Densidad y Paquetes de enemigos)** — Los enemigos aparecen en paquetes de tamaño $k = \text{packSizeForFloor}(f) = \text{clamp}(4 + \lfloor f/3 \rfloor, 3, 8)$ (con $+2$ en pisos exigentes hasta tope 8; paquetes fijos de 2 en jefes), con escalonamiento temporal $\text{PACK\_STAGGER\_SEC} = 0.35\text{ s}$ y dispersión angular $\text{PACK\_SPREAD\_RAD} = 0.18\text{ rad}$. Conteo $N(f) = \text{clamp}(\text{round}(14 + 1.4 \cdot f), 16, 110)$ en ventana $S(f) = \min(45, 32 + 0.25 \cdot f)$, garantizando densidad de combate (`meanAlive` mediana $\ge 2.8$ con picos de hasta 17 vivos simultáneos). |
+| **D30** | **¿Cómo eliminar tiempos muertos cuando el jugador limpia la arena antes de tiempo?** | **Confirmado (Ritmo de piso acelerado por arena limpia)** — Cuando en la arena quedan $\le 1$ enemigos normales vivos (`FLOOR_CLOCK_BOOST_MAX_ALIVE = 1`), el reloj de piso avanza a `FLOOR_CLOCK_BOOST = 2.5x`, logrando una duración mediana en Zona B de 28–45 s y reduciendo la fracción de arena vacía `emptyArenaFraction` a $\le 10\%$. La pausa entre pisos se reduce a `INTER_WAVE_BREAK_SEC = 1.5s`. |
+| **D31** | **¿Cómo evitar la saturación auditiva con la nueva densidad y cadencia de impactos?** | **Confirmado (Audio sutil: tic 'hit' a 0.022 vol, silenciamiento temporal de 'kill' y 'floor' SFX)** — El impacto de proyectil (`hit`) utiliza un pulso corto a volumen reducido `vol: 0.022` (duración 0,03 s); se silencian temporalmente los eventos redundantes de alta repetición (`kill` y `floor` en `SILENT_EVENTS`) para mantener la claridad y nitidez de la mezcla chiptune en tiempo real. |
 
 ---
 
@@ -1200,6 +1212,15 @@ Auditoría técnica y empírica realizada sobre la rama `develop` (`HEAD` de v2.
 ---
 
 ## Anexo B. Historial de Cambios del PRD
+
+### De la v2.6 a la v2.7 (19-oct-2026 — v2.6 → v2.7)
+
+| Sección | Cambio |
+| :--- | :--- |
+| Cabecera, §5.1, §9.10 | **Ritmo y Paquetes de enemigos (D29, D30):** enemigos organizados en paquetes de tamaño $k = \text{packSizeForFloor}(f) = \text{clamp}(4 + \lfloor f/3 \rfloor, 3, 8)$ con `PACK_STAGGER_SEC = 0.35s` y `PACK_SPREAD_RAD = 0.18 rad`. Nueva fórmula de conteo $N(f) = \text{clamp}(\text{round}(14 + 1.4 \cdot f), 16, 110)$ y ventana de spawn $S(f) = \min(45, 32 + 0.25 \cdot f)$. Aceleración de reloj `FLOOR_CLOCK_BOOST = 2.5x` cuando en la arena quedan $\le 1$ enemigos normales vivos (`FLOOR_CLOCK_BOOST_MAX_ALIVE = 1`) para eliminar tiempos muertos. Respiro entre pisos reducido a `INTER_WAVE_BREAK_SEC = 1.5s`. Pisos exigentes (`f % 5 === 4`) con $N \times 1.4$, ventana $S \times 1.15$ y tamaño de paquete $+ 2$. |
+| §6.3 | **Validación Anti-Tamper (`RunProof`):** el Umbral Fisiológico de Tiempo incorpora la aceleración de reloj: cota mínima de duración de run $\ge \sum S(f) / \text{FLOOR\_CLOCK\_BOOST}$. |
+| §9.1.5 | **Criterios de Balance y Calibración v3:** duración mediana de piso normal en Zona B calibrada en 28–45 s; criterio de densidad `meanAlive` con mediana $\ge 2.8$ (con picos de hasta 17 vivos simultáneos); criterio de arena vacía `emptyArenaFraction` con mediana $\le 10\%$. |
+| §9.10 | **Decisiones D29–D31 y Audio Sutil (D31):** formalización de D29 (Densidad y paquetes), D30 (Ritmo acelerado por arena limpia) y D31 (Audio sutil: tic 'hit' a 0.022 vol y 0.03 s de duración, silenciamiento temporal de SFX 'kill' y 'floor' en `SILENT_EVENTS` para preservar la mezcla con alta densidad de enemigos). |
 
 ### De la v2.5 a la v2.6 (18-oct-2026 — v2.5 → v2.6)
 
