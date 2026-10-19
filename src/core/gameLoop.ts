@@ -53,6 +53,8 @@ import {
   BURN_DPS_FACTOR,
   CHAIN_EXTRA_BOUNCES_AT_MAX_PATTERN,
   FIXED_TIMESTEP,
+  FLOOR_CLOCK_BOOST,
+  FLOOR_CLOCK_BOOST_MAX_ALIVE,
   HOT_SWAP_COOLDOWN,
   INTER_WAVE_BREAK_SEC,
   isBossFloor,
@@ -1309,7 +1311,16 @@ function stepOnce(state: GameState, config: GameConfig, rng: () => number): Game
   if (floorRuntime) {
     const hasInvulnBoss = enemies.some((e) => e.alive && e.isBoss && (e.bossInvulnSec ?? 0) > 0);
     if (!hasInvulnBoss) {
-      floorRuntime = { ...floorRuntime, elapsedSec: floorRuntime.elapsedSec + dt };
+      let nonBossNonAddAlive = 0;
+      for (let i = 0; i < enemies.length; i++) {
+        const e = enemies[i];
+        if (e.alive && !e.isBoss && e.tier !== 'add' && e.kind !== 'add') {
+          nonBossNonAddAlive++;
+        }
+      }
+      const clockMult =
+        nonBossNonAddAlive <= FLOOR_CLOCK_BOOST_MAX_ALIVE ? FLOOR_CLOCK_BOOST : 1;
+      floorRuntime = { ...floorRuntime, elapsedSec: floorRuntime.elapsedSec + dt * clockMult };
       while (
         floorRuntime.nextEventIdx < floorRuntime.plan.events.length &&
         floorRuntime.plan.events[floorRuntime.nextEventIdx].tSec <= floorRuntime.elapsedSec &&

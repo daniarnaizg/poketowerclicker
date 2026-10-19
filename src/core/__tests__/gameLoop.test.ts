@@ -13,6 +13,9 @@ import {
   BOSS_PHASE_INVULN_SEC,
   BOSS_PHASE_THRESHOLDS,
   BOSS_TIMER_DURATION,
+  FIXED_TIMESTEP,
+  FLOOR_CLOCK_BOOST,
+  FLOOR_CLOCK_BOOST_MAX_ALIVE,
   HOT_SWAP_COOLDOWN,
   INTER_WAVE_BREAK_SEC,
   LEAK_BASE_DAMAGE,
@@ -24,7 +27,7 @@ import {
   leakDamageForFloor,
 } from '../../config/balance.config';
 import { getEnemyDef } from '../../data/enemies';
-import type { BastionUpgrades, Cooldowns6, GameConfig, GameState, Projectile, Team6 } from '../types';
+import type { BastionUpgrades, Cooldowns6, Enemy, GameConfig, GameState, Projectile, Team6 } from '../types';
 import { PokemonType } from '../types';
 
 const config: GameConfig = { pokedex: POKEDEX, typeChart: TYPE_CHART, seed: 42 };
@@ -1149,5 +1152,106 @@ describe('WP5.core — Boss Phases, Clipping, Invulnerability, Adds and Enrage M
     // bossInvulnSec decreased by dt
     expect(bossAfter.bossInvulnSec).toBeCloseTo(1.0 - 1 / 60, 4);
   });
+
+  describe('P-05 — Reloj de piso adelantado cuando la arena está casi vacía', () => {
+    it('(a) con startRun en el piso 1 y 0 vivos extra, tras un step floorRuntime.elapsedSec avanza ≈ FIXED_TIMESTEP * FLOOR_CLOCK_BOOST', () => {
+      const initial = tickGame(emptyState(), { startRun: [{ definitionId: '0004', stars: 1 }] }, config, 0, mulberry32(1));
+      expect(initial.floor).toBe(1);
+      expect(initial.floorRuntime?.elapsedSec).toBe(0);
+      const aliveNonBossNonAdd = initial.enemies.filter(
+        (e) => e.alive && !e.isBoss && e.tier !== 'add' && e.kind !== 'add',
+      ).length;
+      expect(aliveNonBossNonAdd).toBe(1);
+
+      const next = tickGame(initial, {}, config, FIXED_TIMESTEP * 1000, mulberry32(1));
+      expect(next.floorRuntime?.elapsedSec).toBeCloseTo(FIXED_TIMESTEP * FLOOR_CLOCK_BOOST, 5);
+    });
+
+    it('(b) con 2 enemigos normales vivos inyectados a mano (speed 0, hp muy alto) avanza ≈ FIXED_TIMESTEP (sin boost)', () => {
+      const initial = tickGame(emptyState(), { startRun: [{ definitionId: '0004', stars: 1 }] }, config, 0, mulberry32(1));
+      const enemy1: Enemy = {
+        id: 1001,
+        x: ARENA.CENTER + 150,
+        y: ARENA.CENTER,
+        speed: 0,
+        hp: 1_000_000,
+        maxHp: 1_000_000,
+        alive: true,
+        isBoss: false,
+        definitionId: '0019',
+        types: [PokemonType.Normal],
+        goldValue: 1,
+      };
+      const enemy2: Enemy = {
+        ...enemy1,
+        id: 1002,
+        x: ARENA.CENTER - 150,
+      };
+
+      const pendingEvents = initial.floorRuntime!.plan.events.length - initial.floorRuntime!.nextEventIdx;
+      const injectedState: GameState = {
+        ...initial,
+        enemies: [enemy1, enemy2],
+        waveEnemiesRemaining: pendingEvents + 2,
+      };
+
+      const next = tickGame(injectedState, {}, config, FIXED_TIMESTEP * 1000, mulberry32(1));
+      expect(next.floorRuntime?.elapsedSec).toBeCloseTo(FIXED_TIMESTEP, 5);
+    });
+
+    it('(c) con un jefe vivo y 0 normales sí hay boost', () => {
+      const initial = tickGame(emptyState(), { startRun: [{ definitionId: '0004', stars: 1 }] }, config, 0, mulberry32(1));
+      const boss: Enemy = {
+        id: 2001,
+        x: ARENA.CENTER + 150,
+        y: ARENA.CENTER,
+        speed: 0,
+        hp: 1_000_000,
+        maxHp: 1_000_000,
+        alive: true,
+        isBoss: true,
+        bossInvulnSec: 0,
+        definitionId: '0127',
+        types: [PokemonType.Normal],
+        goldValue: 100,
+      };
+
+      const pendingEvents = initial.floorRuntime!.plan.events.length - initial.floorRuntime!.nextEventIdx;
+      const bossState: GameState = {
+        ...initial,
+        enemies: [boss],
+        waveEnemiesRemaining: pendingEvents + 1,
+      };
+
+      const next = tickGame(bossState, {}, config, FIXED_TIMESTEP * 1000, mulberry32(1));
+      expect(next.floorRuntime?.elapsedSec).toBeCloseTo(FIXED_TIMESTEP * FLOOR_CLOCK_BOOST, 5);
+    });
+
+    it('(d) con state.shop definido no avanza', () => {
+      const initial = tickGame(emptyState(), { startRun: [{ definitionId: '0004', stars: 1 }] }, config, 0, mulberry32(1));
+      const shopState: GameState = {
+        ...initial,
+        shop: { beforeFloor: 2 },
+      };
+
+      const next = tickGame(shopState, {}, config, FIXED_TIMESTEP * 1000, mulberry32(1));
+      expect(next.floorRuntime?.elapsedSec).toBe(0);
+    });
+
+    it('(e) el invariante waveEnemiesRemaining === pendientes + vivos se mantiene tras el cambio', () => {
+      let state = tickGame(emptyState(), { startRun: [{ definitionId: '0004', stars: 1 }] }, config, 0, mulberry32(1));
+      const rng = mulberry32(42);
+
+      for (let step = 0; step < 100; step++) {
+        state = tickGame(state, {}, config, FIXED_TIMESTEP * 1000, rng);
+        if (state.floorRuntime && state.phase === 'PLAYING') {
+          const pending = state.floorRuntime.plan.events.length - state.floorRuntime.nextEventIdx;
+          const alive = state.enemies.filter((e) => e.alive).length;
+          expect(state.waveEnemiesRemaining).toBe(pending + alive);
+        }
+      }
+    });
+  });
 });
+
 
