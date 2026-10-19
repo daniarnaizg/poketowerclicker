@@ -610,7 +610,8 @@ function fireProjectiles(
   bonuses: TeamBonuses,
   allocId?: () => number,
 ): Projectile[] {
-  const living = enemies.filter((e) => e.alive);
+  const vulnerable = enemies.filter((e) => e.alive && (e.bossInvulnSec ?? 0) <= 0);
+  const living = vulnerable.length > 0 ? vulnerable : enemies.filter((e) => e.alive);
   if (living.length === 0) return [];
 
   const spdMult = attackSpeedMultiplier(state.bastionUpgrades);

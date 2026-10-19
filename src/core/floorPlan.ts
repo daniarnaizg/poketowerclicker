@@ -110,15 +110,19 @@ export function buildFloorPlan(seed: number, floor: number): FloorPlan {
     let tSec: number;
     if (kind === 'hard') {
       const burstIdx = Math.min(2, Math.floor((i * 3) / totalEnemies));
-      const burstStart = burstIdx * (spawnWindowSec / 3);
       const burstSpan = (spawnWindowSec / 3) * 0.65;
+      const burstStart = burstIdx * ((spawnWindowSec - burstSpan) / 2);
       const burstStartIdx = burstStartIndices[burstIdx];
       const localIdx = i - burstStartIdx;
       const burstCount = Math.max(1, burstCounts[burstIdx]);
-      const localRatio = localIdx === 0 ? 0 : Math.pow(localIdx / burstCount, SPAWN_TIME_EXPONENT);
+      const localRatio =
+        localIdx === 0 ? 0 : Math.pow(localIdx / Math.max(1, burstCount - 1), SPAWN_TIME_EXPONENT);
       tSec = burstStart + burstSpan * localRatio;
     } else {
-      tSec = i === 0 ? 0 : spawnWindowSec * Math.pow(i / totalEnemies, SPAWN_TIME_EXPONENT);
+      tSec =
+        i === 0
+          ? 0
+          : spawnWindowSec * Math.pow(i / Math.max(1, totalEnemies - 1), SPAWN_TIME_EXPONENT);
     }
 
     tSec = Number(tSec.toFixed(4));

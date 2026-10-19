@@ -100,26 +100,26 @@ flowchart TD
 
 | Oleada | Tarea | WP | Título | Escribe en | Estado |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| **1** | `T-01` | WP0 / WP6 | Script `bench:core` en `package.json` y limpieza de `nul` + `.gitignore` | `package.json`, `.gitignore`, `nul` (borrado) | Pendiente |
-| **1** | `T-02` | WP1 | Extender `rng.ts` con `salt` y añadir tipos de Spawner y Fases a `types.ts` | `src/core/rng.ts`, `src/core/types.ts`, `src/core/__tests__/rng.test.ts` | Pendiente |
-| **1** | `T-03` | WP1 / WP4 | Nuevas constantes y funciones de curva/economía/fases en `balance.config.ts` | `src/config/balance.config.ts` | Pendiente |
-| **1** | `T-04` | WP0 | Actualizar `PRD.md` a v2.6 — Parte 1 (Cabecera, §1, §3.2, §4.4.2, §4.4.4, §5.1, §6.3) | `PRD.md` | Pendiente |
-| **2** | `T-05` | WP2 | Implementar `src/core/floorPlan.ts` (`buildFloorPlan`, `previewWave`, `buildBossAddEvents`) y actualizar `waveGenerator.ts` | `src/core/floorPlan.ts`, `src/core/waveGenerator.ts` | Pendiente |
-| **2** | `T-06` | WP0 | Actualizar `PRD.md` a v2.6 — Parte 2 (§8, §9.1.5, §9.5, §9.6, §9.9, §9.10) | `PRD.md` | Pendiente |
-| **3** | `T-07` | WP2 / WP4 | Tests unitarios de `floorPlan.ts` y economía/fugas (`src/core/__tests__/floorPlan.test.ts`) | `src/core/__tests__/floorPlan.test.ts` | Pendiente |
-| **3** | `T-08` | WP6.1 | Sustituir `maxEntityId(state)` por contador `nextEntityId` en `src/core/gameLoop.ts` | `src/core/gameLoop.ts` | Pendiente |
-| **3** | `T-18` | WP0 | Actualizar `PRD.md` a v2.6 — Parte 3 (Anexo A y Anexo B) | `PRD.md` | Pendiente |
-| **4** | `T-09` | WP3 | Integrar `FloorRuntime`, cola con `ALIVE_CAP` y `waveEnemiesRemaining` derivado en `gameLoop.ts` | `src/core/gameLoop.ts` | Pendiente |
-| **4** | `T-16` | WP6.3 / WP5 | Optimizar `src/renderer/arena.ts` en un solo pase sin closures, barras de HP condicionales y marcas 66/33 en jefe | `src/renderer/arena.ts` | Pendiente |
-| **5** | `T-10` | WP3 | Actualizar tests en `gameLoop.test.ts` y añadir tests de `ALIVE_CAP` y cola de spawn | `src/core/__tests__/gameLoop.test.ts` | Pendiente |
-| **5** | `T-17` | WP5.UI | Añadir indicadores de Fase de Jefe (`FASE 1/2/3`, `INVULN`, `ENFURECIDO`) en `GameHUD.tsx` | `src/ui/components/GameHUD.tsx` | Pendiente |
-| **6** | `T-11` | WP5.pre | Refactor: centralizar todo el daño a enemigos en `applyDamageToEnemy` en `gameLoop.ts` (commit propio) | `src/core/gameLoop.ts` | Pendiente |
-| **7** | `T-12` | WP5.core | Implementar fases de jefe (66 % / 33 %), recorte anti-one-shot, invulnerabilidad 1,5 s, adds y `BOSS_TIMER_MODE` en `gameLoop.ts` | `src/core/gameLoop.ts` | Pendiente |
-| **8** | `T-13` | WP5.test | Suite de tests unitarios de jefes por fases (`src/core/__tests__/bossPhases.test.ts`) | `src/core/__tests__/bossPhases.test.ts` | Pendiente |
-| **9** | `T-14` | WP6.2/4/5 | Agrupación de `floatingTexts`, selección O(E·k) en `fireProjectiles` y topes de efectos en `gameLoop.ts` | `src/core/gameLoop.ts` | Pendiente |
-| **10** | `T-15` | WP6.bench | Ampliar `scripts/bench-core.ts` con proyectiles realistas, AoE y jefes anclados | `scripts/bench-core.ts` | Pendiente |
-| **10** | `T-19` | WP7.sim | Actualizar `scripts/sim-balance.ts` con métricas por zona (A–D), `φ`, TTK de jefe y perfiles | `scripts/sim-balance.ts` | Pendiente |
-| **11** | `T-20` | WP7.cal | **(Orquestador)** Calibración iterativa de parámetros en `balance.config.ts` y validación de §7.1 | `src/config/balance.config.ts`, `docs/analysis/sim-v3-report.md` | Pendiente |
+| **1** | `T-01` | WP0 / WP6 | Script `bench:core` en `package.json` y limpieza de `nul` + `.gitignore` | `package.json`, `.gitignore`, `nul` (borrado) | Hecha (`afaab94`) |
+| **1** | `T-02` | WP1 | Extender `rng.ts` con `salt` y añadir tipos de Spawner y Fases a `types.ts` | `src/core/rng.ts`, `src/core/types.ts`, `src/core/__tests__/rng.test.ts` | Hecha (`871a137`) |
+| **1** | `T-03` | WP1 / WP4 | Nuevas constantes y funciones de curva/economía/fases en `balance.config.ts` | `src/config/balance.config.ts` | Hecha (`fbec4cc`) |
+| **1** | `T-04` | WP0 | Actualizar `PRD.md` a v2.6 — Parte 1 (Cabecera, §1, §3.2, §4.4.2, §4.4.4, §5.1, §6.3) | `PRD.md` | Hecha (`e197114`) |
+| **2** | `T-05` | WP2 | Implementar `src/core/floorPlan.ts` (`buildFloorPlan`, `previewWave`, `buildBossAddEvents`) y actualizar `waveGenerator.ts` | `src/core/floorPlan.ts`, `src/core/waveGenerator.ts` | Hecha (`949a7be`) |
+| **2** | `T-06` | WP0 | Actualizar `PRD.md` a v2.6 — Parte 2 (§8, §9.1.5, §9.5, §9.6, §9.9, §9.10) | `PRD.md` | Hecha (`6666520`) |
+| **3** | `T-07` | WP2 / WP4 | Tests unitarios de `floorPlan.ts` y economía/fugas (`src/core/__tests__/floorPlan.test.ts`) | `src/core/__tests__/floorPlan.test.ts` | Hecha (`1a032a7`) |
+| **3** | `T-08` | WP6.1 | Sustituir `maxEntityId(state)` por contador `nextEntityId` en `src/core/gameLoop.ts` | `src/core/gameLoop.ts` | Hecha (`2ef8428`) |
+| **3** | `T-18` | WP0 | Actualizar `PRD.md` a v2.6 — Parte 3 (Anexo A y Anexo B) | `PRD.md` | Hecha (`c78680b`) |
+| **4** | `T-09` | WP3 | Integrar `FloorRuntime`, cola con `ALIVE_CAP` y `waveEnemiesRemaining` derivado en `gameLoop.ts` | `src/core/gameLoop.ts` | Hecha (`907f1da`) |
+| **4** | `T-16` | WP6.3 / WP5 | Optimizar `src/renderer/arena.ts` en un solo pase sin closures, barras de HP condicionales y marcas 66/33 en jefe | `src/renderer/arena.ts`, `src/renderer/enemyDraw.test.ts` | Hecha (`1ab1462`) |
+| **5** | `T-10` | WP3 | Actualizar tests en `gameLoop.test.ts` y añadir tests de `ALIVE_CAP` y cola de spawn | `src/core/__tests__/gameLoop.test.ts` | Hecha (`ffed7e6`) |
+| **5** | `T-17` | WP5.UI | Añadir indicadores de Fase de Jefe (`FASE 1/2/3`, `INVULN`, `ENFURECIDO`) en `GameHUD.tsx` | `src/ui/components/GameHUD.tsx` | Hecha (`1b28bde`) |
+| **6** | `T-11` | WP5.pre | Refactor: centralizar todo el daño a enemigos en `applyDamageToEnemy` en `gameLoop.ts` (commit propio) | `src/core/gameLoop.ts` | Hecha (`7bf066e`) |
+| **7** | `T-12` | WP5.core | Implementar fases de jefe (66 % / 33 %), recorte anti-one-shot, invulnerabilidad 1,5 s, adds y `BOSS_TIMER_MODE` en `gameLoop.ts` | `src/core/gameLoop.ts` | Hecha (`f8369dc`) |
+| **8** | `T-13` | WP5.test | Suite de tests unitarios de jefes por fases (`src/core/__tests__/bossPhases.test.ts`) | `src/core/__tests__/bossPhases.test.ts` | Hecha (`a9386d9`) |
+| **9** | `T-14` | WP6.2/4/5 | Agrupación de `floatingTexts`, selección O(E·k) en `fireProjectiles` y topes de efectos en `gameLoop.ts` | `src/core/gameLoop.ts` | Hecha (`e56d812`) |
+| **10** | `T-15` | WP6.bench | Ampliar `scripts/bench-core.ts` con proyectiles realistas, AoE y jefes anclados | `scripts/bench-core.ts` | Hecha (`8ccee2b`) |
+| **10** | `T-19` | WP7.sim | Actualizar `scripts/sim-balance.ts` con métricas por zona (A–D), `φ`, TTK de jefe y perfiles | `scripts/sim-balance.ts` | Hecha (`05377f2`) |
+| **11** | `T-20` | WP7.cal | **(Orquestador)** Calibración iterativa de parámetros en `balance.config.ts` y validación de §7.1 | `src/config/balance.config.ts`, `docs/analysis/sim-v3-report.md` | Hecha |
 
 ---
 
@@ -1780,10 +1780,28 @@ ENTREGA: lista de archivos cambiados, salida de los comandos de aceptación y, s
 
 ---
 
-## 5. Bitácora de Ejecución
+## 5. Bitácora de Ejecución e Incidencias
 
 - **2026-10-18**:
-  - `Paso 0` completado: `pnpm install && pnpm test && pnpm run test:balance` y `scripts/bench-core.ts` ejecutados en verde (`19` suites, `201` tests). Salida guardada en `docs/analysis/baseline-2026-10-18.txt`.
+  - `Paso 0` completado (`2a28dd6`): `pnpm install && pnpm test && pnpm run test:balance` y `scripts/bench-core.ts` ejecutados en verde (`19` suites, `201` tests). Salida guardada en `docs/analysis/baseline-2026-10-18.txt`.
   - Copiada especificación a `docs/SPEC_SPAWNER_BOSSES.md` y creado `scripts/bench-core.ts`.
   - Creado mapa de código detallado y verificación `B1–B12` en `docs/analysis/codemap-spawner.md`.
-  - Redactado `docs/PLAN_SPAWNER_BOSSES.md` con 20 tareas (`T-01` a `T-20`) organizadas en 11 oleadas. En espera de confirmación del autor para lanzar la Oleada 1.
+  - Redactado `docs/PLAN_SPAWNER_BOSSES.md` con 20 tareas (`T-01` a `T-20`) organizadas en 11 oleadas.
+  - **Oleada 1 completada**: `T-01` (`afaab94`), `T-02` (`871a137`), `T-03` (`fbec4cc`), `T-04` (`e197114`).
+  - **Oleada 2 completada**: `T-05` (`949a7be`), `T-06` (`6666520`).
+- **2026-10-19**:
+  - **Oleada 3 completada**: `T-07` (`1a032a7`), `T-08` (`2ef8428`), `T-18` (`c78680b`). WP0 (`PRD.md` v2.6) finalizado al 100 %.
+  - **Oleada 4 completada**: `T-09` (`907f1da`), `T-16` (`1ab1462`).
+    - *Incidencia resuelta (`T-16`)*: el subagente reportó `BLOQUEO` porque el resumen del prompt abreviaba nombres respecto a la especificación detallada en `docs/PLAN_SPAWNER_BOSSES.md`; se le confirmó ejecutar la Opción A (especificación exacta del plan sobre `ArenaRenderer`, `renderEnemies` y `renderHPBar`).
+  - **Oleada 5 completada**: `T-10` (`ffed7e6`), `T-17` (`1b28bde`).
+  - **Oleada 6 completada**: `T-11` (`7bf066e`) — Refactor `applyDamageToEnemy` en commit dedicado previo a WP5.
+  - **Oleada 7 completada**: `T-12` (`f8369dc`) — Jefes de 3 fases (66 % / 33 %), recorte anti-one-shot, invulnerabilidad de 1,5 s, adds y modo `enrage`.
+  - **Oleadas 8 y 9 completadas**: `T-13` (`a9386d9` — 13 tests en `bossPhases.test.ts`), `T-14` (`e56d812` — agrupación de textos, topes FX y `selectNearestK` O(E·k)).
+  - **Oleada 10 completada**: `T-19` (`05377f2` — Simulador v3), `T-15` (`8ccee2b` — `bench-core.ts` Tabla 2 realista).
+    - *Incidencia resuelta (`T-15`/`T-19`)*: un reinicio del servidor detuvo temporalmente los subagentes de la Oleada 10; se reactivó `T-19` con `send_message` y se relanzó `T-15` limpio sin subagentes anidados.
+  - **Oleada 11 completada (`T-20` — Orquestador)**:
+    - Ajustada interpolación temporal $u = \frac{i}{\max(1, N - 1)}$ en `src/core/floorPlan.ts` para que el último evento nazca exactamente en $t = S(f)$ (§2.2 y §6.3 `RunProof`).
+    - Preferencia por objetivos vulnerables `(e.bossInvulnSec ?? 0) <= 0` en `fireProjectiles` durante la transición invulnerable de jefe.
+    - Calibrados `ENEMY_HP_BASE = 55`, `ENEMY_HP_FLOOR_GROWTH = 1.086`, `baseSpawnWindowSec(f) = min(60, 48 + 0.15*f)`, `BOSS_POOL_FACTOR_MINI = 1.20` y `BOSS_POOL_FACTOR_GRAND = 2.4` en `src/config/balance.config.ts`.
+    - Generado informe final en `docs/analysis/sim-v3-report.md` con los 10 criterios de §7.1 en verde.
+

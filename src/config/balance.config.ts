@@ -240,9 +240,9 @@ export function floorEnemyCount(floor: number): number {
 export function baseSpawnWindowSec(floor: number): number {
   const f = Math.max(1, Math.floor(floor));
   if (f > 100) {
-    return Math.max(35, 55 - 0.1 * (f - 100));
+    return Math.max(35, 60 - 0.1 * (f - 100));
   }
-  return Math.min(55, 40 + 0.15 * f);
+  return Math.min(60, 48 + 0.15 * f);
 }
 
 /** Effective spawn window S(f) for the floor (multiplied by 1.5 on hard floors). */
@@ -276,8 +276,8 @@ export function bossBounty(floor: number): number {
 }
 
 // --- Enemy HP & Leaks (D24, §3.2–§3.3) ---
-export const ENEMY_HP_BASE = 140;
-export const ENEMY_HP_FLOOR_GROWTH = 1.075;
+export const ENEMY_HP_BASE = 55;
+export const ENEMY_HP_FLOOR_GROWTH = 1.086;
 
 export function enemyHp(floor: number): number {
   return Math.max(1, Math.floor(ENEMY_HP_BASE * Math.pow(ENEMY_HP_FLOOR_GROWTH, Math.max(0, floor - 1))));
@@ -300,8 +300,8 @@ export function leakDamageForFloor(floor: number): number {
 }
 
 // --- Bosses by TTK & Phases (D25–D28, §4.1–§4.6) ---
-export const BOSS_POOL_FACTOR_MINI = 0.6;
-export const BOSS_POOL_FACTOR_GRAND = 1.2;
+export const BOSS_POOL_FACTOR_MINI = 1.20;
+export const BOSS_POOL_FACTOR_GRAND = 2.4;
 export const BOSS_PHASE_THRESHOLDS: readonly [number, number] = [0.66, 0.33];
 export const BOSS_PHASE_INVULN_SEC = 1.5;
 export const BOSS_PHASE_ANCHOR_FRACTION: readonly [number, number, number] = [0.05, 0.07, 0.09];

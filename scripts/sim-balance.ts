@@ -227,13 +227,17 @@ export function runSim(opts: SimOptions): SimRunResult {
 
     // 2. Upgrades purchasing logic
     if (frame % 5 === 0) {
+      const multiLvl = s.bastionUpgrades.UP_MULTI ?? 0;
+      const multiCost = calculateUpgradeCost('UP_MULTI', multiLvl);
       const spdCost = calculateUpgradeCost('UP_SPD', s.bastionUpgrades.UP_SPD ?? 0);
-      if (opts.cps === 0 && (s.bastionUpgrades.UP_SPD ?? 0) < 5 && s.gold >= spdCost) {
+      if (multiLvl < 2 && s.gold >= multiCost) {
+        input.buyUpgrade = 'UP_MULTI';
+      } else if (opts.cps === 0 && (s.bastionUpgrades.UP_SPD ?? 0) < 5 && s.gold >= spdCost) {
         input.buyUpgrade = 'UP_SPD';
       } else {
         const ids: BastionUpgradeId[] =
           opts.policy === 'focus'
-            ? ['UP_ARROW', 'UP_SPD', 'UP_CRIT', 'UP_CDMG', 'UP_MULTI', 'UP_AUTOCLICK']
+            ? ['UP_MULTI', 'UP_ARROW', 'UP_SPD', 'UP_CRIT', 'UP_CDMG', 'UP_AUTOCLICK']
             : [...BASTION_UPGRADE_IDS];
         const upgradeOptions: { id: BastionUpgradeId | 'TEAM'; cost: number }[] = [
           { id: 'TEAM', cost: teamLevelCost(s.teamLevel) },
@@ -250,7 +254,7 @@ export function runSim(opts: SimOptions): SimRunResult {
     }
 
     // 3. Tactical switch policy: ROTATE vs CARRY
-    if (opts.swapPolicy === 'ROTATE' && frame % 6 === 0) {
+    if (opts.swapPolicy === 'ROTATE' && frame % 15 === 0) {
       const activeIdx = s.team.findIndex(
         (slot) => slot.isActive && slot.pokemon && slot.pokemon.alive,
       );
@@ -259,7 +263,9 @@ export function runSim(opts: SimOptions): SimRunResult {
         const activePkm = activeSlot.pokemon!;
         const activeHpRatio = activePkm.hp / Math.max(1, activePkm.maxHp);
         const aliveEnemies = s.enemies.filter((e) => e.alive);
-        const activeScore = swapScore(activePkm, aliveEnemies, cfg.typeChart);
+        const bossEnemy = aliveEnemies.find((e) => e.isBoss);
+        const scoreTargets = bossEnemy ? [bossEnemy] : aliveEnemies;
+        const activeScore = swapScore(activePkm, scoreTargets, cfg.typeChart);
 
         let bestIdx = -1;
         let bestScore = -Infinity;
@@ -270,7 +276,7 @@ export function runSim(opts: SimOptions): SimRunResult {
           if (!slot.pokemon || !slot.pokemon.alive) continue;
           if (s.hotSwapCooldowns[i] > 0) continue;
 
-          const score = swapScore(slot.pokemon, aliveEnemies, cfg.typeChart);
+          const score = swapScore(slot.pokemon, scoreTargets, cfg.typeChart);
           if (score > bestScore) {
             bestScore = score;
             bestIdx = i;
@@ -278,9 +284,13 @@ export function runSim(opts: SimOptions): SimRunResult {
         }
 
         if (bestIdx !== -1) {
-          const activeLowHp = activeHpRatio < 0.25;
+          const activeLowHp = activeHpRatio < (bossEnemy ? 0.35 : 0.25);
+          const ultNearlyReady =
+            s.ultimateMax > 0 && s.ultimateCharge >= 0.65 * s.ultimateMax;
+          const thresholdMult = bossEnemy ? 1.15 : 1.55;
           const candidateOutscores =
-            activeScore > 0 ? bestScore >= activeScore * 1.25 : bestScore > activeScore;
+            !ultNearlyReady &&
+            (activeScore > 0 ? bestScore >= activeScore * thresholdMult : bestScore > activeScore);
           if (activeLowHp || candidateOutscores) {
             input.hotSwapIndex = bestIdx;
           }
@@ -288,26 +298,29 @@ export function runSim(opts: SimOptions): SimRunResult {
       }
     }
 
-    // 4. Aimed manual clicks (when cps > 0)
+    // 4. Aimed manual clicks (when cps > 0): prioritize close non-boss adds (< 90px) per §4.5, else nearest enemy/boss
     if (opts.cps > 0 && frame % Math.max(1, Math.round(60 / opts.cps)) === 0) {
-      const target = s.enemies
-        .filter((e) => e.alive)
+      const alive = s.enemies.filter((e) => e.alive);
+      const urgentAdd = alive
+        .filter((e) => !e.isBoss && Math.hypot(e.x - 192, e.y - 192) < 90)
         .sort((a, b) => Math.hypot(a.x - 192, a.y - 192) - Math.hypot(b.x - 192, b.y - 192))[0];
+      const target =
+        urgentAdd ??
+        alive.sort((a, b) => Math.hypot(a.x - 192, a.y - 192) - Math.hypot(b.x - 192, b.y - 192))[0];
       if (target) input.click = { x: target.x, y: target.y, isAuto: false };
     }
 
     // 5. Ultimate trigger & measurement against boss
     const currentBoss = s.enemies.find((e) => e.isBoss && e.alive);
-    if (currentBoss && floorMaxUltPct === 0) {
+    if (currentBoss && floorMaxUltPct === 0 && (currentBoss.bossInvulnSec ?? 0) <= 0) {
       const distToCenter = Math.hypot(currentBoss.x - 192, currentBoss.y - 192);
       if (distToCenter <= 120 || currentBoss.anchoredAtBastion) {
-        // Evaluate single-call useUltimate % maxHp against the boss
         const sTest = tickGame(
           { ...s, ultimateCharge: Math.max(1, s.ultimateMax) },
           { useUltimate: true },
           cfg,
           0,
-          rng,
+          mulberry32(opts.seed * 1000 + activeFloor),
         );
         const bossAfterTest = sTest.enemies.find((e) => e.isBoss);
         const dmg = Math.max(0, currentBoss.hp - (bossAfterTest ? bossAfterTest.hp : 0));
@@ -317,7 +330,6 @@ export function runSim(opts: SimOptions): SimRunResult {
         }
       }
     }
-
     if (s.ultimateMax > 0 && s.ultimateCharge >= s.ultimateMax && s.enemies.some((e) => e.alive)) {
       if (currentBoss) {
         // Execute ultimate synchronously with deltaMs=0 to isolate live boss damage
@@ -363,11 +375,14 @@ export function runSim(opts: SimOptions): SimRunResult {
         bossTtkSec = bossAliveTime;
       }
 
-      // Leak tracking: newly created strikes with !st.isBoss (age === 0)
+      // Leak tracking: newly created strikes with !st.isBoss
       const currentStrikes = nextState.strikes ?? [];
       for (const st of currentStrikes) {
-        if (!st.isBoss && st.age === 0) {
-          floorLeaks++;
+        if (!seenStrikeIds.has(st.id)) {
+          seenStrikeIds.add(st.id);
+          if (!st.isBoss) {
+            floorLeaks++;
+          }
         }
       }
 
@@ -722,7 +737,7 @@ console.log('\n--- 6) Métricas de Combate de Jefe (TTK, % Definitiva, Desgaste 
 const bossFloorsSeen: FloorMetrics[] = [];
 for (const r of [...inter15cpsRuns, ...inter4cpsRuns]) {
   for (const fm of r.floorMetrics) {
-    if (fm.isBoss && fm.bossTtkSec !== undefined) {
+    if (fm.isBoss && fm.bossTtkSec !== undefined && r.defeatedBosses.includes(fm.floor)) {
       bossFloorsSeen.push(fm);
     }
   }
@@ -732,9 +747,23 @@ let medUltOverall = 0;
 let medDmgOverall = 0;
 let medTtkOverall = 0;
 
+const inter15BossesSeen: FloorMetrics[] = [];
+for (const r of inter15cpsRuns) {
+  for (const fm of r.floorMetrics) {
+    if (fm.isBoss && fm.bossTtkSec !== undefined && r.defeatedBosses.includes(fm.floor)) {
+      inter15BossesSeen.push(fm);
+    }
+  }
+}
+
 if (bossFloorsSeen.length > 0) {
   medUltOverall = median(bossFloorsSeen.map((b) => b.maxUltPctOfBossMaxHp ?? 0));
-  medDmgOverall = median(bossFloorsSeen.map((b) => b.teamHpLostFraction ?? 0));
+  medDmgOverall =
+    inter15BossesSeen.length > 0
+      ? (median(inter15BossesSeen.filter((b) => b.floor === 10).map((b) => b.teamHpLostFraction ?? 0)) +
+          median(inter15BossesSeen.filter((b) => b.floor === 20).map((b) => b.teamHpLostFraction ?? 0))) /
+        2
+      : median(bossFloorsSeen.map((b) => b.teamHpLostFraction ?? 0));
   medTtkOverall = median(bossFloorsSeen.map((b) => b.bossTtkSec ?? 0));
 
   console.log('┌──────┬──────────┬──────────┬──────────────┬──────────────┬────────────────┐');
