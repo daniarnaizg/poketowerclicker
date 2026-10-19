@@ -30,15 +30,15 @@ const C4 = 60, E4 = 64, G4 = 67, B3 = 59, D4 = 62;
 const C5 = 72, E5 = 76, G5 = 79, C6 = 84, B5 = 83, E6 = 88;
 
 export const SFX: Record<SfxName, Player> = {
-  /** Disparo del clic: "pip" corto y brillante. */
+  /** Disparo del clic: toque suave y discreto para evitar fatiga. */
   click(c, d, t, v) {
-    tone(c, d, { wave: 'pulse25', freq: 760 + v * 200, to: 420, t, dur: 0.07, vol: 0.1 });
-    noise(c, d, { t, dur: 0.025, vol: 0.035, filter: 'highpass', f0: 5000 });
+    tone(c, d, { wave: 'sine', freq: 520 + v * 60, to: 340, t, dur: 0.02, vol: 0.025 });
   },
 
-  /** Impacto de daño a enemigo: tic muy sutil. */
+  /** Impacto de daño a enemigo: sonido muy corto y seco (tap percusivo sin cola ni barrido agudo). */
   hit(c, d, t, v) {
-    tone(c, d, { wave: 'pulse12', freq: 900 + v * 250, to: 600, t, dur: 0.03, vol: 0.022 });
+    tone(c, d, { wave: 'triangle', freq: 320 + v * 50, to: 140, t, dur: 0.012, vol: 0.035 });
+    noise(c, d, { t, dur: 0.008, vol: 0.02, filter: 'bandpass', f0: 1800, q: 2.5 });
   },
 
   /** Enemigo derrotado: caída de tono tipo "faint" + chasquido. */
@@ -47,10 +47,10 @@ export const SFX: Record<SfxName, Player> = {
     noise(c, d, { t, dur: 0.11, vol: 0.07, filter: 'bandpass', f0: 1900, f1: 380, q: 1.2 });
   },
 
-  /** El Bastión recibe daño: golpe grave. */
+  /** El Pokémon activo / Bastión recibe daño: golpe grave, perceptible y alarmante. */
   hurt(c, d, t) {
-    tone(c, d, { wave: 'triangle', freq: 170, to: 52, t, dur: 0.12, vol: 0.07 });
-    noise(c, d, { t, dur: 0.10, vol: 0.04, filter: 'lowpass', f0: 1000, f1: 140 });
+    tone(c, d, { wave: 'triangle', freq: 175, to: 48, t, dur: 0.16, vol: 0.16 });
+    noise(c, d, { t, dur: 0.14, vol: 0.08, filter: 'lowpass', f0: 950, f1: 120 });
   },
 
   /** Definitiva: barrido ascendente + acorde brillante. */
@@ -144,9 +144,9 @@ export const SFX: Record<SfxName, Player> = {
 /** Separación mínima entre dos reproducciones del mismo efecto (ms). */
 export const SFX_MIN_GAP_MS: Record<SfxName, number> = {
   click: 45,
-  hit: 140,
+  hit: 100,
   kill: 55,
-  hurt: 350,
+  hurt: 250,
   ultimate: 300,
   swap: 120,
   floor: 400,

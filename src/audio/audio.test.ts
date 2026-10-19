@@ -121,3 +121,24 @@ describe('temas musicales', () => {
     expect(t.melody.length % t.chords.length).toBe(0);
   });
 });
+
+describe('controles independientes de audio (BGM y SFX)', () => {
+  it('permite alternar BGM y SFX de forma independiente', async () => {
+    const { audio } = await import('./index');
+
+    const initialMusic = audio.isMusicMuted();
+    const initialSfx = audio.isSfxMuted();
+
+    expect(audio.toggleMusic()).toBe(!initialMusic);
+    expect(audio.isMusicMuted()).toBe(!initialMusic);
+    expect(audio.isSfxMuted()).toBe(initialSfx); // SFX no cambia al tocar BGM
+
+    expect(audio.toggleSfx()).toBe(!initialSfx);
+    expect(audio.isSfxMuted()).toBe(!initialSfx);
+    expect(audio.isMusicMuted()).toBe(!initialMusic); // BGM no cambia al tocar SFX
+
+    // Restaurar
+    audio.setMusicMuted(initialMusic);
+    audio.setSfxMuted(initialSfx);
+  });
+});

@@ -36,7 +36,7 @@ function applyScene(): void {
 function playSfx(name: SfxName): void {
   const c = engine.getContext();
   const buses = engine.getBuses();
-  if (!c || !buses || engine.getPrefs().muted || c.state !== 'running') return;
+  if (!c || !buses || engine.isSfxMuted() || c.state !== 'running') return;
   const now = performance.now();
   if (now - (lastPlayed.get(name) ?? -1e9) < SFX_MIN_GAP_MS[name]) return;
   lastPlayed.set(name, now);
@@ -63,7 +63,7 @@ export const audio = {
     };
     const onKey = (e: KeyboardEvent): void => {
       onGesture();
-      if (e.code === 'KeyM' && !e.repeat && !e.ctrlKey && !e.metaKey && !e.altKey) engine.toggleMuted();
+      if (e.code === 'KeyM' && !e.repeat && !e.ctrlKey && !e.metaKey && !e.altKey) engine.toggleSfx();
     };
     const onVisibility = (): void => engine.setPageVisible(!document.hidden);
 
@@ -109,6 +109,12 @@ export const audio = {
   },
 
   isMuted: () => engine.getPrefs().muted,
+  isMusicMuted: engine.isMusicMuted,
+  isSfxMuted: engine.isSfxMuted,
   toggleMute: engine.toggleMuted,
+  toggleMusic: engine.toggleMusic,
+  toggleSfx: engine.toggleSfx,
+  setMusicMuted: engine.setMusicMuted,
+  setSfxMuted: engine.setSfxMuted,
   subscribe: engine.subscribe,
 };
