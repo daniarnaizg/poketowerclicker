@@ -41,9 +41,14 @@ import {
   AOE_SPLASH_DAMAGE_FACTOR,
   AOE_SPLASH_RADIUS,
   AOE_SPLASH_STAR_MULTIPLIER,
-  BOSS_ANCHOR_MAX_HP_FRACTION,
-  BOSS_ANCHOR_TICK_SEC,
+  BOSS_ENRAGE_INTERVAL_SEC,
+  BOSS_ENRAGE_MULT_PER_STEP,
+  BOSS_PHASE_ANCHOR_FRACTION,
+  BOSS_PHASE_ANCHOR_TICK_SEC,
+  BOSS_PHASE_INVULN_SEC,
+  BOSS_PHASE_THRESHOLDS,
   BOSS_STATUS_DURATION_FACTOR,
+  BOSS_TIMER_MODE,
   bossTimerForFloor,
   BURN_DPS_FACTOR,
   CHAIN_EXTRA_BOUNCES_AT_MAX_PATTERN,
@@ -67,7 +72,7 @@ import {
 } from '../config/balance.config';
 import { calculateDamage, getEffectiveness } from './damage';
 import type { DamageAttacker } from './damage';
-import { buildFloorPlan } from './floorPlan';
+import { buildBossAddEvents, buildFloorPlan } from './floorPlan';
 import { spawnBossForFloor, spawnEnemyAt } from './waveGenerator';
 import { rngFor } from './rng';
 import {
@@ -245,6 +250,32 @@ function applyDamageToEnemy(
   if (!enemy.alive || rawAmount <= 0) {
     return { appliedAmount: 0, killed: false, goldGained: 0 };
   }
+  if ((enemy.bossInvulnSec ?? 0) > 0) {
+    return { appliedAmount: 0, killed: false, goldGained: 0 };
+  }
+  if (enemy.isBoss) {
+    const phase = enemy.bossPhase ?? 1;
+    if (phase === 1) {
+      const thresholdHp = Math.ceil(enemy.maxHp * BOSS_PHASE_THRESHOLDS[0]);
+      if (enemy.hp - rawAmount <= thresholdHp && thresholdHp > 0) {
+        const appliedAmount = Math.max(0, enemy.hp - thresholdHp);
+        enemy.hp = thresholdHp;
+        enemy.bossPhase = 2;
+        enemy.bossInvulnSec = BOSS_PHASE_INVULN_SEC;
+        return { appliedAmount, killed: false, goldGained: 0, phaseTriggered: 2 };
+      }
+    } else if (phase === 2) {
+      const thresholdHp = Math.ceil(enemy.maxHp * BOSS_PHASE_THRESHOLDS[1]);
+      if (enemy.hp - rawAmount <= thresholdHp && thresholdHp > 0) {
+        const appliedAmount = Math.max(0, enemy.hp - thresholdHp);
+        enemy.hp = thresholdHp;
+        enemy.bossPhase = 3;
+        enemy.bossInvulnSec = BOSS_PHASE_INVULN_SEC;
+        return { appliedAmount, killed: false, goldGained: 0, phaseTriggered: 3 };
+      }
+    }
+  }
+
   const prevHp = enemy.hp;
   enemy.hp = prevHp - rawAmount;
   const appliedAmount = rawAmount;
@@ -262,6 +293,7 @@ interface HitOutcome {
   amount: number;
   killed: boolean;
   goldGained: number;
+  phaseTriggered?: 2 | 3;
 }
 
 /** Apply one damage instance to a (cloned) enemy and report the outcome. */
@@ -288,7 +320,74 @@ function hitEnemy(
     event.amount,
     goldMultiplier(state.bastionUpgrades) + bonuses.gold,
   );
-  return { amount: result.appliedAmount, killed: result.killed, goldGained: result.goldGained };
+  return {
+    amount: result.appliedAmount,
+    killed: result.killed,
+    goldGained: result.goldGained,
+    phaseTriggered: result.phaseTriggered,
+  };
+}
+
+function enqueueBossPhaseAdds(
+  floorRuntime: FloorRuntime | undefined,
+  seed: number,
+  floor: number,
+  phase: 2 | 3,
+): FloorRuntime | undefined {
+  if (!floorRuntime) return floorRuntime;
+  const newEvents = buildBossAddEvents(
+    seed,
+    floor,
+    phase,
+    floorRuntime.elapsedSec,
+    floorRuntime.plan.events.length,
+  );
+  if (newEvents.length === 0) return floorRuntime;
+
+  const pastEvents = floorRuntime.plan.events.slice(0, floorRuntime.nextEventIdx);
+  const futureEvents = floorRuntime.plan.events.slice(floorRuntime.nextEventIdx);
+  const combinedFuture = [...futureEvents, ...newEvents].sort((a, b) => a.tSec - b.tSec);
+  const mergedEvents = [...pastEvents, ...combinedFuture];
+
+  return {
+    ...floorRuntime,
+    plan: {
+      ...floorRuntime.plan,
+      events: mergedEvents,
+      totalEnemies: mergedEvents.length,
+    },
+  };
+}
+
+function cleanupBossAdds(
+  enemies: Enemy[],
+  floorRuntime: FloorRuntime | undefined,
+): FloorRuntime | undefined {
+  for (const e of enemies) {
+    if ((e.tier === 'add' || e.kind === 'add') && e.alive) {
+      e.alive = false;
+      e.hp = 0;
+    }
+  }
+  if (!floorRuntime) return floorRuntime;
+
+  const pastEvents = floorRuntime.plan.events
+    .slice(0, floorRuntime.nextEventIdx)
+    .filter((ev) => ev.tier !== 'add');
+  const futureEvents = floorRuntime.plan.events
+    .slice(floorRuntime.nextEventIdx)
+    .filter((ev) => ev.tier !== 'add');
+  const mergedEvents = [...pastEvents, ...futureEvents];
+
+  return {
+    ...floorRuntime,
+    nextEventIdx: pastEvents.length,
+    plan: {
+      ...floorRuntime.plan,
+      events: mergedEvents,
+      totalEnemies: mergedEvents.length,
+    },
+  };
 }
 
 function aimProjectileAtPoint(p: Projectile, tx: number, ty: number, speed: number): void {
@@ -440,18 +539,23 @@ function applySwitchInBurst(
   defeatedBossFloors: number[],
   floatingTexts: FloatingText[],
   effects: VisualEffect[],
+  floorRuntime?: FloorRuntime,
 ): {
   shield: number;
   damageDelta: number;
   killsDelta: number;
   goldDelta: number;
   nextTextId: number;
+  floorRuntime?: FloorRuntime;
+  phaseBannerText?: string;
 } {
   let shield = currentShield;
   let damageDelta = 0;
   let killsDelta = 0;
   let goldDelta = 0;
   let nextTextId = startTextId;
+  let currentFloorRuntime = floorRuntime;
+  let phaseBannerText: string | undefined;
 
   const bonuses = computeTeamBonuses(team, config.pokedex);
   const attacker = attackerOf(incoming, incoming.types);
@@ -481,11 +585,20 @@ function applySwitchInBurst(
     damageDelta += result.appliedAmount;
     damagePerSlot[slotIndex] += result.appliedAmount;
 
+    if (result.phaseTriggered) {
+      currentFloorRuntime = enqueueBossPhaseAdds(currentFloorRuntime, config.seed ?? 1, floor, result.phaseTriggered);
+      floatingTexts.push(createFloatingText(nextTextId++, enemy.x, enemy.y, `¡FASE ${result.phaseTriggered}!`, '#f8a030'));
+      phaseBannerText = `¡FASE ${result.phaseTriggered}!`;
+    }
+
     if (result.killed) {
       killsDelta += 1;
       goldDelta += result.goldGained;
-      if (enemy.isBoss && !defeatedBossFloors.includes(floor)) {
-        defeatedBossFloors.push(floor);
+      if (enemy.isBoss) {
+        if (!defeatedBossFloors.includes(floor)) {
+          defeatedBossFloors.push(floor);
+        }
+        currentFloorRuntime = cleanupBossAdds(enemies, currentFloorRuntime);
       }
     } else {
       caught.push({ enemy, amount: result.appliedAmount });
@@ -518,6 +631,8 @@ function applySwitchInBurst(
     killsDelta,
     goldDelta,
     nextTextId,
+    floorRuntime: currentFloorRuntime,
+    phaseBannerText,
   };
 }
 
@@ -690,6 +805,7 @@ function startRun(
     awaitingNextWave: false,
     autoAdvanceWave: undefined,
     bastionShieldSec: 0,
+    phaseBannerText: undefined,
     effects: [],
     nextEntityId: nextId,
     runStats: {
@@ -719,7 +835,7 @@ function applyHotSwap(
   if (!targetSlot || !targetSlot.pokemon || !targetSlot.pokemon.alive || targetSlot.isActive) return state;
   if (state.hotSwapCooldowns[index] > 0) return state;
 
-  const floorRuntime = syncFloorRuntimeWithManualState(state);
+  let floorRuntime = syncFloorRuntimeWithManualState(state);
 
   const cooldowns = state.hotSwapCooldowns.map((c, i) =>
     i === index ? HOT_SWAP_COOLDOWN : c,
@@ -765,7 +881,9 @@ function applyHotSwap(
     defeatedBossFloors,
     floatingTexts,
     effects,
+    floorRuntime,
   );
+  floorRuntime = burst.floorRuntime;
 
   const finalEnemies = enemies.filter((e) => e.alive);
   const waveEnemiesRemaining = computeWaveEnemiesRemaining(floorRuntime, finalEnemies);
@@ -774,6 +892,7 @@ function applyHotSwap(
     ...next,
     enemies: finalEnemies,
     floorRuntime,
+    phaseBannerText: burst.phaseBannerText ?? next.phaseBannerText,
     gold: next.gold + burst.goldDelta,
     waveEnemiesRemaining,
     floatingTexts,
@@ -890,18 +1009,31 @@ function applyUltimate(state: GameState, config: GameConfig, rng: () => number):
     effects.push(createEffect(nextTextId++, 'FLASH', active.types[0], C, C));
   }
 
+  let currentFloorRuntime = floorRuntime;
+  let phaseBannerText = state.phaseBannerText;
+
   for (const enemy of enemies) {
     if (!enemy.alive || !inRange(enemy)) continue;
     const outcome = hitEnemy(enemy, baseDmg, attacker, state, rng, config, bonuses);
     totalDamage += outcome.amount;
     damagePerSlot[slotIndex] += outcome.amount;
     floatingTexts.push(createFloatingText(nextTextId++, enemy.x, enemy.y, `${outcome.amount}`, '#c084fc'));
+
+    if (outcome.phaseTriggered) {
+      currentFloorRuntime = enqueueBossPhaseAdds(currentFloorRuntime, config.seed ?? 1, state.floor, outcome.phaseTriggered);
+      floatingTexts.push(createFloatingText(nextTextId++, enemy.x, enemy.y, `¡FASE ${outcome.phaseTriggered}!`, '#f8a030'));
+      phaseBannerText = `¡FASE ${outcome.phaseTriggered}!`;
+    }
+
     if (outcome.killed) {
       totalKills += 1;
       gold += outcome.goldGained;
       totalGold += outcome.goldGained;
-      if (enemy.isBoss && !defeatedBossFloors.includes(state.floor)) {
-        defeatedBossFloors.push(state.floor);
+      if (enemy.isBoss) {
+        if (!defeatedBossFloors.includes(state.floor)) {
+          defeatedBossFloors.push(state.floor);
+        }
+        currentFloorRuntime = cleanupBossAdds(enemies, currentFloorRuntime);
       }
       floatingTexts.push(createFloatingText(nextTextId++, enemy.x, enemy.y, `+${outcome.goldGained}`, '#ffd700'));
     } else if (ult.status) {
@@ -910,12 +1042,13 @@ function applyUltimate(state: GameState, config: GameConfig, rng: () => number):
   }
 
   const finalEnemies = enemies.filter((e) => e.alive);
-  const waveEnemiesRemaining = computeWaveEnemiesRemaining(floorRuntime, finalEnemies);
+  const waveEnemiesRemaining = computeWaveEnemiesRemaining(currentFloorRuntime, finalEnemies);
 
   return {
     ...state,
     enemies: finalEnemies,
-    floorRuntime,
+    floorRuntime: currentFloorRuntime,
+    phaseBannerText,
     gold,
     waveEnemiesRemaining,
     floatingTexts,
@@ -1045,6 +1178,7 @@ function stepOnce(state: GameState, config: GameConfig, rng: () => number): Game
   };
 
   let bastionShieldSec = state.bastionShieldSec ?? 0;
+  let phaseBannerText = state.phaseBannerText;
   let phase: GamePhase = state.phase;
   let gold = state.gold;
   let totalKills = state.runStats.totalKills;
@@ -1152,7 +1286,12 @@ function stepOnce(state: GameState, config: GameConfig, rng: () => number): Game
         defeatedBossFloors,
         floatingTexts,
         effects,
+        floorRuntime,
       );
+      floorRuntime = burst.floorRuntime;
+      if (burst.phaseBannerText) {
+        phaseBannerText = burst.phaseBannerText;
+      }
       bastionShieldSec = burst.shield;
       totalDamage += burst.damageDelta;
       totalKills += burst.killsDelta;
@@ -1174,6 +1313,12 @@ function stepOnce(state: GameState, config: GameConfig, rng: () => number): Game
   for (const enemy of enemies) {
     if (!enemy.alive) continue;
 
+    if (enemy.isBoss && (enemy.bossInvulnSec ?? 0) > 0) {
+      const remainingInvuln = (enemy.bossInvulnSec ?? 0) - dt;
+      enemy.bossInvulnSec = remainingInvuln <= 1e-6 ? 0 : remainingInvuln;
+      continue;
+    }
+
     let speedFactor = 1;
     if (enemy.statuses) {
       const burn = enemy.statuses.find((s) => s.id === 'BURN');
@@ -1186,12 +1331,21 @@ function stepOnce(state: GameState, config: GameConfig, rng: () => number): Game
         );
         totalDamage += result.appliedAmount;
         if (burn.sourceSlot !== undefined && burn.sourceSlot >= 0) damagePerSlot[burn.sourceSlot] += result.appliedAmount;
+        if (result.phaseTriggered) {
+          floorRuntime = enqueueBossPhaseAdds(floorRuntime, config.seed ?? 1, floor, result.phaseTriggered);
+          floatingTexts.push(createFloatingText(nextTextId++, enemy.x, enemy.y, `¡FASE ${result.phaseTriggered}!`, '#f8a030'));
+          phaseBannerText = `¡FASE ${result.phaseTriggered}!`;
+          continue;
+        }
         if (result.killed) {
           totalKills += 1;
           gold += result.goldGained;
           totalGold += result.goldGained;
-          if (enemy.isBoss && !defeatedBossFloors.includes(floor)) {
-            defeatedBossFloors.push(floor);
+          if (enemy.isBoss) {
+            if (!defeatedBossFloors.includes(floor)) {
+              defeatedBossFloors.push(floor);
+            }
+            floorRuntime = cleanupBossAdds(enemies, floorRuntime);
           }
           floatingTexts.push(createFloatingText(nextTextId++, enemy.x, enemy.y, `+${result.goldGained}`, '#ffd700'));
           continue;
@@ -1212,14 +1366,24 @@ function stepOnce(state: GameState, config: GameConfig, rng: () => number): Game
           enemy.x = ARENA.CENTER - (dx / d) * ARENA.BASTION_DAMAGE_R;
           enemy.y = ARENA.CENTER - (dy / d) * ARENA.BASTION_DAMAGE_R;
         }
+        const phaseIdx = Math.min(2, Math.max(0, (enemy.bossPhase ?? 1) - 1));
+        let anchorFraction = BOSS_PHASE_ANCHOR_FRACTION[phaseIdx];
+        const anchorInterval = BOSS_PHASE_ANCHOR_TICK_SEC[phaseIdx];
+        if (enemy.enraged) {
+          anchorFraction *= Math.pow(
+            BOSS_ENRAGE_MULT_PER_STEP,
+            1 + Math.floor((enemy.enrageElapsedSec ?? 0) / BOSS_ENRAGE_INTERVAL_SEC),
+          );
+        }
+
         const cd = (enemy.bossAttackCooldownSec !== undefined ? enemy.bossAttackCooldownSec : 0) - dt;
         if (cd <= 0) {
           recordStrike(enemy);
           const currentActive = team.find((s) => s.isActive && s.pokemon?.alive)?.pokemon;
           if (currentActive) {
-            applyDamageToActive(currentActive.maxHp * BOSS_ANCHOR_MAX_HP_FRACTION, enemy.types, 'boss');
+            applyDamageToActive(currentActive.maxHp * anchorFraction, enemy.types, 'boss');
           }
-          enemy.bossAttackCooldownSec = BOSS_ANCHOR_TICK_SEC;
+          enemy.bossAttackCooldownSec = anchorInterval;
         } else {
           enemy.bossAttackCooldownSec = cd;
         }
@@ -1254,12 +1418,20 @@ function stepOnce(state: GameState, config: GameConfig, rng: () => number): Game
     totalDamage += outcome.amount;
     if (currentSlotIndex >= 0) damagePerSlot[currentSlotIndex] += outcome.amount;
     floatingTexts.push(createFloatingText(nextTextId++, enemy.x, enemy.y, `${outcome.amount}`, color));
+    if (outcome.phaseTriggered) {
+      floorRuntime = enqueueBossPhaseAdds(floorRuntime, config.seed ?? 1, floor, outcome.phaseTriggered);
+      floatingTexts.push(createFloatingText(nextTextId++, enemy.x, enemy.y, `¡FASE ${outcome.phaseTriggered}!`, '#f8a030'));
+      phaseBannerText = `¡FASE ${outcome.phaseTriggered}!`;
+    }
     if (outcome.killed) {
       totalKills += 1;
       gold += outcome.goldGained;
       totalGold += outcome.goldGained;
-      if (enemy.isBoss && !defeatedBossFloors.includes(floor)) {
-        defeatedBossFloors.push(floor);
+      if (enemy.isBoss) {
+        if (!defeatedBossFloors.includes(floor)) {
+          defeatedBossFloors.push(floor);
+        }
+        floorRuntime = cleanupBossAdds(enemies, floorRuntime);
       }
       floatingTexts.push(
         createFloatingText(nextTextId++, enemy.x, enemy.y, `+${outcome.goldGained}`, '#ffd700'),
@@ -1328,8 +1500,25 @@ function stepOnce(state: GameState, config: GameConfig, rng: () => number): Game
 
   // 4. Boss kill-timer.
   const boss = aliveEnemies.find((e) => e.isBoss);
-  bossTimerSec = boss ? (bossTimerSec ?? (boss.bossTimerSec ?? bossTimerForFloor(floor))) - dt : undefined;
-  if (boss) boss.bossTimerSec = bossTimerSec;
+  const timerMode = config.bossTimerMode ?? BOSS_TIMER_MODE;
+  if (boss) {
+    if (bossTimerSec === undefined) {
+      bossTimerSec = boss.bossTimerSec ?? bossTimerForFloor(floor);
+    }
+    if ((boss.bossInvulnSec ?? 0) <= 0) {
+      bossTimerSec -= dt;
+      if (bossTimerSec <= 0) {
+        if (timerMode === 'enrage') {
+          bossTimerSec = 0;
+          boss.enraged = true;
+          boss.enrageElapsedSec = (boss.enrageElapsedSec ?? 0) + dt;
+        }
+      }
+    }
+    boss.bossTimerSec = bossTimerSec;
+  } else {
+    bossTimerSec = undefined;
+  }
 
   runStats = {
     ...runStats,
@@ -1345,14 +1534,21 @@ function stepOnce(state: GameState, config: GameConfig, rng: () => number): Game
   const nextShield = Math.max(0, bastionShieldSec - dt);
 
   // 5. Defeat check: all team wiped, or a boss outlived its timer.
+  const bossExpired =
+    timerMode === 'gameover' &&
+    Boolean(boss) &&
+    (boss?.bossInvulnSec ?? 0) <= 0 &&
+    bossTimerSec !== undefined &&
+    bossTimerSec <= 0;
+
   if (
     phase === 'GAME_OVER' ||
     team.every((s) => !s.pokemon || !s.pokemon.alive) ||
-    (boss && bossTimerSec !== undefined && bossTimerSec <= 0)
+    bossExpired
   ) {
     if (phase !== 'GAME_OVER') {
       phase = 'GAME_OVER';
-      if (boss && bossTimerSec !== undefined && bossTimerSec <= 0) {
+      if (bossExpired) {
         runStats = {
           ...runStats,
           defeatCause: 'bossTimerExpired',
@@ -1370,6 +1566,7 @@ function stepOnce(state: GameState, config: GameConfig, rng: () => number): Game
       phase: 'GAME_OVER',
       floor,
       floorRuntime,
+      phaseBannerText,
       enemies: aliveEnemies,
       projectiles: liveProjectiles,
       floatingTexts,
@@ -1415,6 +1612,7 @@ function stepOnce(state: GameState, config: GameConfig, rng: () => number): Game
     if (interWaveTimerSec <= 0) {
       interWaveTimerSec = undefined;
       floor += 1;
+      phaseBannerText = undefined;
       const nextFloor = initFloorRuntime(config.seed ?? 1, floor, nextTextId);
       finalEnemies = nextFloor.initialEnemies;
       floorRuntime = nextFloor.floorRuntime;
@@ -1431,6 +1629,7 @@ function stepOnce(state: GameState, config: GameConfig, rng: () => number): Game
     ...state,
     floor,
     floorRuntime,
+    phaseBannerText,
     enemies: finalEnemies,
     projectiles: liveProjectiles,
     floatingTexts,

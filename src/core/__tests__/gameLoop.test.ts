@@ -8,6 +8,10 @@ import { ARENA } from '../../config/arena.config';
 import {
   ALIVE_CAP,
   BOSS_HP_MULTIPLIER,
+  BOSS_PHASE_ANCHOR_FRACTION,
+  BOSS_PHASE_ANCHOR_TICK_SEC,
+  BOSS_PHASE_INVULN_SEC,
+  BOSS_PHASE_THRESHOLDS,
   BOSS_TIMER_DURATION,
   HOT_SWAP_COOLDOWN,
   INTER_WAVE_BREAK_SEC,
@@ -20,7 +24,7 @@ import {
   leakDamageForFloor,
 } from '../../config/balance.config';
 import { getEnemyDef } from '../../data/enemies';
-import type { BastionUpgrades, Cooldowns6, GameConfig, GameState, Team6 } from '../types';
+import type { BastionUpgrades, Cooldowns6, GameConfig, GameState, Projectile, Team6 } from '../types';
 import { PokemonType } from '../types';
 
 const config: GameConfig = { pokedex: POKEDEX, typeChart: TYPE_CHART, seed: 42 };
@@ -399,8 +403,9 @@ describe('tickGame', () => {
       waveEnemiesRemaining: bossWave.length,
       bossTimerSec: 0.01,
     };
-    const next = tickGame(bossState, {}, config, 16.7, mulberry32(33));
+    const next = tickGame(bossState, {}, { ...config, bossTimerMode: 'gameover' }, 16.7, mulberry32(33));
     expect(next.phase).toBe('GAME_OVER');
+    expect(next.runStats.defeatCause).toBe('bossTimerExpired');
   });
 
   it('ends the run when an enemy reaches the bastion and HP is depleted', () => {
@@ -811,6 +816,336 @@ describe('WP3 — Continuous Spawner Queue & ALIVE_CAP', () => {
     expect(state.floorRuntime!.elapsedSec).toBe(elapsedBefore);
     expect(state.enemies.length).toBe(enemiesBefore);
     expect(state.floorRuntime!.nextEventIdx).toBe(nextEventBefore);
+  });
+});
+
+describe('WP5.core — Boss Phases, Clipping, Invulnerability, Adds and Enrage Mode', () => {
+  it('clips boss HP at 66% on phase 1 and at 33% on phase 2, discarding excess damage and granting invulnerability', () => {
+    const base = startingRun(1);
+    const maxHp = 1000;
+    const threshold66 = Math.ceil(maxHp * BOSS_PHASE_THRESHOLDS[0]); // 660
+    const threshold33 = Math.ceil(maxHp * BOSS_PHASE_THRESHOLDS[1]); // 330
+    const teamNoShoot = base.team.map((s) =>
+      s.isActive && s.pokemon ? { ...s, pokemon: { ...s.pokemon, spd: 0 } } : s,
+    ) as Team6;
+    const bossEnemy = {
+      ...base.enemies[0],
+      id: 99,
+      x: ARENA.CENTER + 50,
+      y: ARENA.CENTER,
+      speed: 0,
+      hp: maxHp,
+      maxHp,
+      alive: true,
+      isBoss: true,
+      bossPhase: 1 as const,
+      bossInvulnSec: 0,
+      definitionId: '0127',
+      types: [PokemonType.Normal] as [PokemonType],
+    };
+    const state: GameState = {
+      ...base,
+      team: teamNoShoot,
+      floor: 10,
+      enemies: [bossEnemy],
+      waveEnemiesRemaining: 1,
+      interWaveTimerSec: undefined,
+    };
+
+    // Huge damage projectile hits the boss in phase 1
+    const projectile1: Projectile = {
+      id: 500,
+      x: ARENA.CENTER + 50,
+      y: ARENA.CENTER,
+      vx: 0,
+      vy: 0,
+      damage: 10_000,
+      types: [PokemonType.Fighting],
+      fromPlayer: true,
+    };
+    const next1 = tickGame({ ...state, projectiles: [projectile1] }, {}, config, 16.7, mulberry32(1));
+    const bossAfter1 = next1.enemies.find((e) => e.id === 99)!;
+    expect(bossAfter1.hp).toBe(threshold66); // Clipped at 660!
+    expect(bossAfter1.bossPhase).toBe(2);
+    expect(bossAfter1.bossInvulnSec).toBe(BOSS_PHASE_INVULN_SEC);
+    expect(next1.phaseBannerText).toBe('¡FASE 2!');
+    expect(next1.floatingTexts.some((t) => t.text === '¡FASE 2!')).toBe(true);
+
+    // During invulnerability (bossInvulnSec > 0), another projectile hits: deals 0 damage
+    const projectile2: Projectile = {
+      id: 501,
+      x: ARENA.CENTER + 50,
+      y: ARENA.CENTER,
+      vx: 0,
+      vy: 0,
+      damage: 1000,
+      types: [PokemonType.Fighting],
+      fromPlayer: true,
+    };
+    const nextInvuln = tickGame({ ...next1, projectiles: [projectile2] }, {}, config, 16.7, mulberry32(2));
+    const bossInvuln = nextInvuln.enemies.find((e) => e.id === 99)!;
+    expect(bossInvuln.hp).toBe(threshold66); // Unchanged!
+    expect(bossInvuln.bossInvulnSec).toBeCloseTo(BOSS_PHASE_INVULN_SEC - 1 / 60, 4);
+
+    // Let invulnerability expire (90 ticks = 1.5s)
+    let expiredState = nextInvuln;
+    for (let i = 0; i < 90; i++) {
+      expiredState = tickGame(expiredState, {}, config, 16.7, mulberry32(10 + i));
+    }
+    const bossReady = expiredState.enemies.find((e) => e.id === 99)!;
+    expect(bossReady).toBeDefined();
+    expect(bossReady.bossInvulnSec).toBe(0);
+    expect(bossReady.bossPhase).toBe(2);
+
+    // In Phase 2, another massive hit crosses 33% threshold
+    const projectile3: Projectile = {
+      id: 502,
+      x: bossReady.x,
+      y: bossReady.y,
+      vx: 0,
+      vy: 0,
+      damage: 10_000,
+      types: [PokemonType.Fighting],
+      fromPlayer: true,
+    };
+    const next2 = tickGame({ ...expiredState, projectiles: [projectile3] }, {}, config, 16.7, mulberry32(100));
+    const bossAfter2 = next2.enemies.find((e) => e.id === 99)!;
+    expect(bossAfter2.hp).toBe(threshold33); // Clipped at 330!
+    expect(bossAfter2.bossPhase).toBe(3);
+    expect(bossAfter2.bossInvulnSec).toBe(BOSS_PHASE_INVULN_SEC);
+    expect(next2.phaseBannerText).toBe('¡FASE 3!');
+
+    // Expire invulnerability again
+    let expiredState2 = next2;
+    for (let i = 0; i < 90; i++) {
+      expiredState2 = tickGame(expiredState2, {}, config, 16.7, mulberry32(200 + i));
+    }
+    const bossReady2 = expiredState2.enemies.find((e) => e.id === 99)!;
+    expect(bossReady2).toBeDefined();
+    expect(bossReady2.bossPhase).toBe(3);
+    expect(bossReady2.bossInvulnSec).toBe(0);
+
+    // In Phase 3, lethal hit kills the boss
+    const projectile4: Projectile = {
+      id: 503,
+      x: bossReady2.x,
+      y: bossReady2.y,
+      vx: 0,
+      vy: 0,
+      damage: 10_000,
+      types: [PokemonType.Fighting],
+      fromPlayer: true,
+    };
+    const next3 = tickGame({ ...expiredState2, projectiles: [projectile4] }, {}, config, 16.7, mulberry32(300));
+    const bossDead = next3.enemies.find((e) => e.id === 99);
+    expect(bossDead).toBeUndefined();
+    expect(next3.runStats.totalKills).toBeGreaterThan(expiredState2.runStats.totalKills);
+    expect(next3.runStats.defeatedBossFloors).toContain(10);
+  });
+
+  it('enqueues phase adds on phase 2 and 3, and cleans them up without gold/kills on boss death', () => {
+    const base = startingRun(1);
+    const maxHp = 1000;
+    const teamNoShoot = base.team.map((s) =>
+      s.isActive && s.pokemon ? { ...s, pokemon: { ...s.pokemon, spd: 0 } } : s,
+    ) as Team6;
+    const bossEnemy = {
+      ...base.enemies[0],
+      id: 99,
+      x: ARENA.CENTER + 50,
+      y: ARENA.CENTER,
+      speed: 0,
+      hp: maxHp,
+      maxHp,
+      alive: true,
+      isBoss: true,
+      bossPhase: 1 as const,
+      bossInvulnSec: 0,
+      definitionId: '0127',
+      types: [PokemonType.Normal] as [PokemonType],
+    };
+    const state: GameState = {
+      ...base,
+      team: teamNoShoot,
+      floor: 10,
+      enemies: [bossEnemy],
+      waveEnemiesRemaining: 1,
+      interWaveTimerSec: undefined,
+    };
+
+    // Phase 1 -> 2: triggers enqueueBossPhaseAdds
+    const p1: Projectile = {
+      id: 500,
+      x: bossEnemy.x,
+      y: bossEnemy.y,
+      vx: 0,
+      vy: 0,
+      damage: 10_000,
+      types: [PokemonType.Fighting],
+      fromPlayer: true,
+    };
+    const sPhase2 = tickGame({ ...state, projectiles: [p1] }, {}, config, 16.7, mulberry32(1));
+    const pendingAddsPhase2 = sPhase2.floorRuntime!.plan.events.filter((ev) => ev.tier === 'add');
+    expect(pendingAddsPhase2.length).toBe(6); // BOSS_PHASE_ADDS[1] = 6
+
+    // Spawn an add manually into enemies to test alive add cleanup
+    const aliveAdd = {
+      ...bossEnemy,
+      id: 1001,
+      x: ARENA.CENTER + 80,
+      y: ARENA.CENTER,
+      hp: 100,
+      maxHp: 100,
+      isBoss: false,
+      tier: 'add' as const,
+    };
+    const sWithAdd: GameState = {
+      ...sPhase2,
+      enemies: [...sPhase2.enemies, aliveAdd],
+      waveEnemiesRemaining: sPhase2.waveEnemiesRemaining + 1,
+    };
+
+    // Directly kill boss in phase 3
+    const sPhase3Boss = sWithAdd.enemies.find((e) => e.id === 99)!;
+    sPhase3Boss.bossPhase = 3;
+    sPhase3Boss.bossInvulnSec = 0;
+    sPhase3Boss.hp = 10;
+
+    const killProj: Projectile = {
+      id: 502,
+      x: sPhase3Boss.x,
+      y: sPhase3Boss.y,
+      vx: 0,
+      vy: 0,
+      damage: 10_000,
+      types: [PokemonType.Fighting],
+      fromPlayer: true,
+    };
+    const goldBefore = sWithAdd.gold;
+    const killsBefore = sWithAdd.runStats.totalKills;
+    const sDead = tickGame({ ...sWithAdd, projectiles: [killProj] }, {}, config, 16.7, mulberry32(2));
+
+    // Alive add was cleaned up (alive = false, hp = 0, filtered out)
+    expect(sDead.enemies.some((e) => e.id === 1001)).toBe(false);
+    // Future add events in queue were removed
+    const pendingAddsAfterDeath = sDead.floorRuntime!.plan.events.filter((ev) => ev.tier === 'add');
+    expect(pendingAddsAfterDeath.length).toBe(0);
+    // Add did not award kill or gold (only boss did)
+    expect(sDead.runStats.totalKills).toBe(killsBefore + 1);
+    expect(sDead.gold).toBe(goldBefore + Math.floor(bossEnemy.goldValue));
+  });
+
+  it('scales boss anchor strike damage and interval by phase, and multiplies by enrage multiplier', () => {
+    const testAnchor = (phase: 1 | 2 | 3, enraged = false, enrageElapsed = 0) => {
+      const base = tickGame(emptyState(), { startRun: [{ definitionId: '0004', stars: 1 }, null, null, null, null, null] }, config, 0, mulberry32(1));
+      const active0 = base.team[0].pokemon!;
+      const boss = {
+        ...base.enemies[0],
+        id: 99,
+        x: ARENA.CENTER,
+        y: ARENA.CENTER + 10,
+        hp: 1000,
+        maxHp: 1000,
+        alive: true,
+        isBoss: true,
+        bossPhase: phase,
+        bossInvulnSec: 0,
+        anchoredAtBastion: true,
+        bossAttackCooldownSec: 0,
+        enraged,
+        enrageElapsedSec: enrageElapsed,
+        definitionId: '0127',
+        types: [PokemonType.Normal] as [PokemonType],
+      };
+      const s = tickGame({ ...base, enemies: [boss], waveEnemiesRemaining: 1, interWaveTimerSec: 1.5 }, {}, config, 16.7, mulberry32(1));
+      const active1 = s.team[0].pokemon!;
+      const dmg = active0.hp - active1.hp;
+      const bossCooldown = s.enemies[0].bossAttackCooldownSec;
+      return { dmg, bossCooldown, maxHp: active0.maxHp };
+    };
+
+    const p1 = testAnchor(1);
+    const p2 = testAnchor(2);
+    const p3 = testAnchor(3);
+
+    expect(p1.dmg).toBe(Math.round(p1.maxHp * BOSS_PHASE_ANCHOR_FRACTION[0]));
+    expect(p2.dmg).toBe(Math.round(p2.maxHp * BOSS_PHASE_ANCHOR_FRACTION[1]));
+    expect(p3.dmg).toBe(Math.round(p3.maxHp * BOSS_PHASE_ANCHOR_FRACTION[2]));
+
+    expect(p1.bossCooldown).toBe(BOSS_PHASE_ANCHOR_TICK_SEC[0]);
+    expect(p2.bossCooldown).toBe(BOSS_PHASE_ANCHOR_TICK_SEC[1]);
+    expect(p3.bossCooldown).toBe(BOSS_PHASE_ANCHOR_TICK_SEC[2]);
+
+    // Enraged test (at 0s enrageElapsedSec: 1.5x damage)
+    const enraged0 = testAnchor(1, true, 0.05);
+    expect(enraged0.dmg).toBe(Math.round(enraged0.maxHp * (BOSS_PHASE_ANCHOR_FRACTION[0] * 1.5)));
+
+    // Enraged test after 10s (2.25x damage)
+    const enraged10 = testAnchor(1, true, 10.5);
+    expect(enraged10.dmg).toBe(Math.round(enraged10.maxHp * (BOSS_PHASE_ANCHOR_FRACTION[0] * 2.25)));
+  });
+
+  it('in enrage mode, does not end run on timer expire, sets boss.enraged = true and accumulates enrageElapsedSec', () => {
+    const base = startingRun(31);
+    const bossWave = generateWave(10, mulberry32(32));
+    const bossState: GameState = {
+      ...base,
+      floor: 10,
+      enemies: bossWave,
+      waveEnemiesRemaining: bossWave.length,
+      bossTimerSec: 0.01,
+    };
+    // Default config has bossTimerMode: 'enrage' (BOSS_TIMER_MODE)
+    const next = tickGame(bossState, {}, config, 16.7, mulberry32(33));
+    expect(next.phase).toBe('PLAYING');
+    const boss = next.enemies.find((e) => e.isBoss)!;
+    expect(boss.enraged).toBe(true);
+    expect(boss.bossTimerSec).toBe(0);
+    expect(next.bossTimerSec).toBe(0);
+    expect(boss.enrageElapsedSec).toBeCloseTo(1 / 60, 4);
+
+    // Another tick increases enrageElapsedSec
+    const next2 = tickGame(next, {}, config, 16.7, mulberry32(34));
+    const boss2 = next2.enemies.find((e) => e.isBoss)!;
+    expect(boss2.enraged).toBe(true);
+    expect(boss2.enrageElapsedSec).toBeCloseTo(2 / 60, 4);
+    expect(next2.phase).toBe('PLAYING');
+  });
+
+  it('freezes boss movement and boss timer while bossInvulnSec > 0', () => {
+    const base = startingRun(1);
+    const boss = {
+      ...base.enemies[0],
+      id: 99,
+      x: ARENA.CENTER + 100,
+      y: ARENA.CENTER,
+      hp: 1000,
+      maxHp: 1000,
+      alive: true,
+      isBoss: true,
+      bossPhase: 2 as const,
+      bossInvulnSec: 1.0,
+      bossTimerSec: 25,
+      definitionId: '0127',
+      types: [PokemonType.Normal] as [PokemonType],
+    };
+    const s: GameState = {
+      ...base,
+      floor: 10,
+      enemies: [boss],
+      waveEnemiesRemaining: 1,
+      bossTimerSec: 25,
+      interWaveTimerSec: 1.5,
+    };
+    const next = tickGame(s, {}, config, 16.7, mulberry32(1));
+    const bossAfter = next.enemies.find((e) => e.id === 99)!;
+    // Position did NOT advance
+    expect(bossAfter.x).toBe(ARENA.CENTER + 100);
+    // Boss timer did NOT decrease
+    expect(next.bossTimerSec).toBe(25);
+    expect(bossAfter.bossTimerSec).toBe(25);
+    // bossInvulnSec decreased by dt
+    expect(bossAfter.bossInvulnSec).toBeCloseTo(1.0 - 1 / 60, 4);
   });
 });
 
