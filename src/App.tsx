@@ -8,12 +8,13 @@ import { useEffect, useRef, useState } from 'preact/hooks';
 import { ArenaRenderer } from './renderer/arena';
 import { audio } from './audio';
 import './renderer/arena.css';
+import './ui/gameUi.css';
 import { useGameStore, useGameState } from './ui/store';
 import { useMetaStore } from './ui/metaStore';
 import { HubScreen } from './ui/components/HubScreen';
 import { loadoutToEntries } from './core/meta';
 import { StarterSelection } from './ui/components/StarterSelection';
-import { TeamBar } from './ui/components/TeamBar';
+import { PokemonPanel } from './ui/components/PokemonPanel';
 import { BastionUpgrades } from './ui/components/BastionUpgrades';
 import { GameHUD } from './ui/components/GameHUD';
 import { bossGuardTarget } from './ui/bossGuard';
@@ -118,7 +119,7 @@ export default function App() {
     speedRef.current = speed;
   }, [speed]);
   // shortcut: session-only; promote to MetaState.settings.bossGuard in core/meta.ts + saveGame when a settings screen exists.
-  const [bossGuard, setBossGuard] = useState(true);
+  const [bossGuard] = useState(true); // sin interruptor en la UI: el selector «JEFE» se retiró del panel; la protección queda siempre activa
   const bossGuardLatch = useRef(0);
   const metaLoaded = useMetaStore((s) => s.loaded);
   const rewards = useMetaStore((s) => s.rewards);
@@ -381,45 +382,37 @@ export default function App() {
   };
 
   return (
-    <div class="flex h-dvh flex-col overflow-y-auto lg:flex-row lg:overflow-hidden">
-      <div class="arena-stage min-h-[70vw] p-5 lg:min-h-0 lg:p-8">
+    <div class="game-shell">
+      <div class="arena-stage">
         <div class="arena-container">
           <canvas ref={canvasRef} width={ARENA.SIZE} height={ARENA.SIZE} />
         </div>
       </div>
 
-      <div class="game-sidebar flex w-full flex-col gap-4 p-4 lg:h-full lg:w-[26rem] lg:overflow-hidden lg:p-6">
+      <div class="game-sidebar">
         {gameState && (
           <>
-            <div class="game-sidebar-col-1 flex flex-col gap-4">
-              <GameHUD
-                gameState={gameState}
-                speed={speed}
-                onSetSpeed={setSpeed}
-                onUltimate={() => useGameStore.getState().requestUltimate()}
-                onToggleAutoAdvance={() =>
-                  useGameStore.getState().requestSetAutoAdvance(gameState.autoAdvanceWave === false)
-                }
-                onStartNextWave={() => useGameStore.getState().requestStartNextWave()}
-                bossGuard={bossGuard}
-                onToggleBossGuard={() => setBossGuard((v) => !v)}
-              />
-              <TeamBar
-                team={gameState.team}
-                hotSwapCooldowns={gameState.hotSwapCooldowns}
-                teamLevel={gameState.teamLevel}
-                onHotSwap={(i) => useGameStore.getState().requestHotSwap(i)}
-              />
-            </div>
-            <div class="game-sidebar-col-2 flex min-h-0 flex-1 flex-col">
-              <BastionUpgrades
-                upgrades={gameState.bastionUpgrades}
-                gold={gameState.gold}
-                teamLevel={gameState.teamLevel}
-                onPurchase={(id) => useGameStore.getState().purchaseUpgrade(id)}
-                onBuyTeamLevel={() => useGameStore.getState().requestTeamLevelUp()}
-              />
-            </div>
+            <GameHUD
+              gameState={gameState}
+              speed={speed}
+              onSetSpeed={setSpeed}
+              onToggleAutoAdvance={() =>
+                useGameStore.getState().requestSetAutoAdvance(gameState.autoAdvanceWave === false)
+              }
+              onStartNextWave={() => useGameStore.getState().requestStartNextWave()}
+            />
+            <PokemonPanel
+              gameState={gameState}
+              onUltimate={() => useGameStore.getState().requestUltimate()}
+              onHotSwap={(i) => useGameStore.getState().requestHotSwap(i)}
+            />
+            <BastionUpgrades
+              upgrades={gameState.bastionUpgrades}
+              gold={gameState.gold}
+              teamLevel={gameState.teamLevel}
+              onPurchase={(id) => useGameStore.getState().purchaseUpgrade(id)}
+              onBuyTeamLevel={() => useGameStore.getState().requestTeamLevelUp()}
+            />
           </>
         )}
       </div>
