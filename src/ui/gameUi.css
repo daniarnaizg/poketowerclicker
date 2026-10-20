@@ -1,0 +1,517 @@
+/*
+ * PokéBastion — interfaz de partida (arena + panel lateral) totalmente escalable.
+ *
+ * Idea central: TODO el panel se dimensiona en `em` y su tamaño base (`--u`) se calcula
+ * a partir del viewport para que arena + panel llenen la pantalla sin huecos:
+ *   - Horizontal (>= 900px y proporción >= 3:2): arena cuadrada a la izquierda (todo el alto)
+ *     y panel de 2 columnas a la derecha. `--u` es el mayor tamaño al que el panel cabe
+ *     tanto en alto como en el ancho que deja la arena.
+ *   - Vertical / pantallas estrechas: arena arriba y panel debajo (con scroll); 2 columnas
+ *     a partir de 640px, 1 columna por debajo.
+ * Como nada usa px fijos (salvo bordes pixel-art mínimos), 1080p, 1440p, 4K, portátiles,
+ * tablets y móviles se ven con las mismas proporciones.
+ */
+
+/* Grosor de borde pixel-art: se resuelve en px donde se declara y se hereda ya calculado. */
+@property --bw {
+  syntax: '<length>';
+  inherits: true;
+  initial-value: 3px;
+}
+
+/* ───────────────────────── Escena ───────────────────────── */
+
+.game-shell {
+  --pad: clamp(6px, 1.3vmin, 20px);
+  --vw: 100vw;
+  /* Diseño del panel en em: columnas y ancho total (incluye el hueco entre columnas). */
+  --sb-wd: 30;
+  --sb-cols: 1;
+  /* Apilado: la arena es cuadrada, nunca más ancha que la pantalla ni más alta que ~62% */
+  --u: clamp(9px, calc((var(--vw) - 2 * var(--pad)) / var(--sb-wd)), 18px);
+  --arena: min(calc(var(--vw) - 2 * var(--pad)), max(62dvh, 360px));
+  --frame: clamp(4px, calc(var(--u) * 0.45), 10px);
+
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--pad);
+  padding: var(--pad);
+  height: 100dvh;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+/* Con ratón y scrollbar clásica, 100vw incluye la barra: se resta para no desbordar. */
+@media (pointer: fine) {
+  .game-shell { --vw: calc(100vw - 16px); }
+}
+
+/* Tablet vertical / ventana mediana: panel en 2 columnas debajo de la arena. */
+@media (min-width: 640px) {
+  .game-shell { --sb-wd: 58; --sb-cols: 2; }
+}
+
+/* Horizontal: arena a la izquierda a todo el alto, panel a la derecha, composición centrada. */
+@media (min-width: 900px) and (min-aspect-ratio: 3/2) {
+  .game-shell {
+    --vw: 100vw;
+    /* Alto de diseño del panel en em (HUD en banda + equipo | mejoras). */
+    --sb-hd: 54;
+    --u: clamp(
+      9px,
+      min(
+        calc((100dvh - 2 * var(--pad)) / var(--sb-hd)),
+        calc((100vw - 100dvh - var(--pad)) / var(--sb-wd))
+      ),
+      22px
+    );
+    --arena: min(
+      calc(100dvh - 2 * var(--pad)),
+      calc(100vw - 3 * var(--pad) - var(--sb-wd) * var(--u))
+    );
+    flex-direction: row;
+    justify-content: center;
+    overflow: hidden;
+  }
+}
+
+/* ───────────────────────── Arena ───────────────────────── */
+
+.game-shell .arena-stage {
+  flex: none;
+  width: var(--arena);
+  height: var(--arena);
+  padding: calc(var(--frame) * 1.7 + 4px);
+}
+
+/* ───────────────────────── Panel lateral ───────────────────────── */
+
+.game-sidebar {
+  --bw: max(3px, 0.3em);
+  flex: none;
+  font-family: 'Press Start 2P', 'Courier New', monospace;
+  font-size: var(--u);
+  line-height: 1.4;
+  width: calc(var(--sb-wd) * 1em);
+  max-width: 100%;
+  display: grid;
+  grid-template-columns: repeat(var(--sb-cols), minmax(0, 1fr));
+  align-content: start;
+  gap: 0.9em;
+  /* hueco para la sombra inferior de las ventanas */
+  padding-bottom: calc(var(--bw) * 1.5);
+}
+
+@media (min-width: 900px) and (min-aspect-ratio: 3/2) {
+  .game-sidebar {
+    /* Misma altura que la arena: HUD a su tamaño y equipo/mejoras reparten el resto. */
+    height: var(--arena);
+    grid-template-rows: auto minmax(min-content, 1fr);
+    max-height: 100%;
+    overflow-x: hidden;
+    overflow-y: auto;
+    scrollbar-width: thin;
+  }
+}
+
+/* Los controles ocupan todo el ancho; Pokémon y mejoras comparten la fila inferior. */
+.game-sidebar > .gx-ctl { grid-column: 1 / -1; }
+
+@media (min-width: 640px) {
+  .game-sidebar { grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); }
+}
+
+/* ───────────────────────── Piezas base ───────────────────────── */
+
+.gx-win {
+  background: #f8f8f0;
+  color: #303030;
+  border: var(--bw) solid #303030;
+  border-radius: calc(var(--bw) * 1.5);
+  box-shadow: inset 0 0 0 var(--bw) #c8d0d8, 0 calc(var(--bw) * 1.5) 0 #00000055;
+  padding: 0.9em;
+  min-width: 0;
+}
+
+.gx-btn {
+  font-family: inherit;
+  font-size: 0.8em;
+  line-height: 1.2;
+  min-height: 3.1em;
+  padding: 0 0.8em;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5em;
+  text-align: center;
+  white-space: nowrap;
+  background: #f8f8f0;
+  color: #303030;
+  border: var(--bw) solid #303030;
+  border-radius: var(--bw);
+  box-shadow: 0 var(--bw) 0 #303030;
+  transition: transform 0.05s;
+  min-width: 0;
+}
+.gx-btn:enabled:hover { background: #ffd860; }
+.gx-btn:enabled:active { transform: translateY(calc(var(--bw) * 0.75)); box-shadow: 0 calc(var(--bw) * 0.25) 0 #303030; }
+.gx-btn:disabled { opacity: 0.65; }
+.gx-btn.is-hot { background: #ffd860; }
+
+/* Conmutadores de color (AUTO, JEFE, velocidad) */
+.gx-tog { color: #fff; text-shadow: 1px 1px 0 #00000088; background: #585858; }
+.gx-tog.is-on { background: #48c048; }
+.gx-tog.is-off { opacity: 0.7; }
+.gx-tog.is-speed { background: #58b0f8; }
+.gx-tog:enabled:hover { filter: brightness(1.12); background-color: inherit; }
+.gx-tog.is-on:enabled:hover { background: #48c048; }
+.gx-tog:not(.is-on):enabled:hover { background: #686868; }
+.gx-tog.is-speed:enabled:hover { background: #58b0f8; }
+
+.gx-coin {
+  display: inline-block;
+  flex: none;
+  width: 1.15em;
+  height: 1.15em;
+  border: calc(var(--bw) * 0.7) solid #303030;
+  border-radius: 50%;
+  background: #f8d030;
+}
+
+.gx-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6em;
+  font-size: 0.85em;
+  min-height: 1.8em;
+}
+
+.gx-num { font-family: 'VT323', monospace; line-height: 1; }
+
+.gx-bar {
+  position: relative;
+  height: 0.9em;
+  background: #f8f8f0;
+  border: calc(var(--bw) * 0.8) solid #303030;
+  border-radius: calc(var(--bw) * 0.7);
+  overflow: hidden;
+  min-width: 0;
+}
+.gx-bar > span { display: block; height: 100%; }
+
+/* Etiquetas de tipo y estrellas heredan escala del panel */
+.game-sidebar .pk-chip {
+  font-size: 0.62em;
+  padding: 0.35em 0.55em;
+  border-width: calc(var(--bw) * 0.6);
+  line-height: 1.2;
+}
+
+/* ───────────────────────── Controles ───────────────────────── */
+
+.gx-ctl { display: flex; flex-direction: column; gap: 0.7em; }
+.gx-ctl-top { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0.7em; }
+@media (min-width: 640px) {
+  .gx-ctl-top { grid-template-columns: 25em minmax(0, 1fr); }
+}
+
+/* Fichas de estado: tamaño fijo, se lee igual con 1 o 3 cifras */
+.gx-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.6em;
+}
+.gx-stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4em;
+  height: 3.3em;
+  padding: 0 0.3em;
+  min-width: 0;
+  background: #303030;
+  color: #f8f8f0;
+  border: var(--bw) solid #f8f8f0;
+  border-radius: calc(var(--bw) * 1.2);
+  box-shadow: 0 0 0 calc(var(--bw) * 0.7) #303030;
+  text-align: center;
+  white-space: nowrap;
+}
+.gx-stat-l { font-size: 0.6em; color: #a8c0e0; letter-spacing: 0; }
+.gx-stat-v { font-size: 0.95em; line-height: 1; }
+.gx-stat-stop .gx-stat-v { color: #78f0a0; }
+.gx-stat-boss .gx-stat-v { color: #f85848; }
+
+/* Ranura única: SIGUIENTE PISO; un jefe vivo la cubre con su fase y su vida. */
+.gx-next-slot { position: relative; display: flex; min-width: 0; }
+.gx-next {
+  flex: 1 1 auto;
+  min-height: 3.3em;
+  justify-content: space-between;
+  padding: 0 0.9em;
+  font-size: 0.9em;
+}
+.gx-next:disabled {
+  background: #c8d0d8;
+  color: #585858;
+  border-color: #585858;
+  box-shadow: 0 var(--bw) 0 #585858;
+  opacity: 1;
+}
+.gx-next-t { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.gx-next-cd { flex: none; min-width: 3.1em; text-align: right; }
+.gx-boss-over {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 0.6em;
+  min-width: 0;
+  padding: 0 0.7em;
+  font-size: 0.75em;
+  background: #f8f8f0;
+  border: var(--bw) solid #303030;
+  border-radius: var(--bw);
+  box-shadow: 0 var(--bw) 0 #303030;
+}
+.gx-boss-hp { flex: none; font-size: 2.1em; text-align: right; }
+.gx-boss-bar { position: relative; display: block; }
+.gx-boss-bar .gx-bar { display: block; width: 100%; height: 1.7em; }
+.gx-boss-tag {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.8em;
+  color: #fff;
+  text-shadow: 1px 1px 0 #000000aa;
+  z-index: 11;
+  pointer-events: none;
+}
+.gx-boss-mark { position: absolute; top: 0; bottom: 0; width: 2px; background: #303030; z-index: 10; pointer-events: none; }
+
+/* Fila de ajustes: velocidad, AUTO y audio (altura constante, independiente del texto) */
+.gx-ctl-bottom { display: flex; align-items: stretch; gap: 0.55em; flex-wrap: wrap; }
+.gx-ctl-bottom .gx-btn { flex: none; }
+.gx-speedgrp { display: flex; align-items: stretch; gap: 0.5em; }
+.gx-speed-ico {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 2.5em;
+  background: #303030;
+  border-radius: var(--bw);
+}
+.gx-speed-ico svg { width: 1.3em; height: 1.3em; display: block; }
+.gx-speed { display: flex; flex: none; }
+.gx-speed .gx-btn { width: 3.5em; padding: 0; border-radius: 0; margin-left: calc(var(--bw) * -1); }
+.gx-speed .gx-btn:first-child { border-radius: var(--bw) 0 0 var(--bw); margin-left: 0; }
+.gx-speed .gx-btn:last-child { border-radius: 0 var(--bw) var(--bw) 0; }
+.gx-auto { width: 9.6em; }
+.gx-audio { display: flex; gap: 0.45em; margin-left: auto; flex: none; }
+.gx-icon-btn { width: 3.1em; padding: 0; }
+.gx-icon-btn svg { width: 1.7em; height: 1.7em; display: block; }
+
+/* ───────────────────────── Pokémon ───────────────────────── */
+
+.gx-pkm { display: flex; flex-direction: column; gap: 0.7em; min-height: 0; }
+.gx-sub { display: flex; flex-direction: column; gap: 0.5em; min-width: 0; min-height: 0; }
+.gx-sl {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6em;
+  font-size: 0.6em;
+  color: #585858;
+  border-bottom: calc(var(--bw) * 0.7) solid #c8d0d8;
+  padding-bottom: 0.5em;
+  white-space: nowrap;
+}
+
+/* Activo: vida, reserva y definitiva */
+.gx-active-hp { display: flex; align-items: flex-end; justify-content: space-between; gap: 0.6em; min-width: 0; }
+.gx-active-name { min-width: 0; font-size: 0.95em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gx-hp { flex: none; font-size: 2.4em; line-height: 0.8; text-align: right; }
+.gx-active-bar { height: 1.4em; flex: none; }
+.gx-reserve { display: flex; align-items: center; gap: 0.8em; min-width: 0; }
+.gx-reserve b { color: #303030; font-weight: normal; }
+.gx-shield { min-width: 7em; text-align: center; color: #2858a8; }
+.gx-pips { display: flex; gap: 0.3em; }
+.gx-pips i {
+  display: block;
+  width: 1.2em;
+  height: 1.2em;
+  box-sizing: border-box;
+  background: #48c048;
+  border: calc(var(--bw) * 0.5) solid #303030;
+}
+.gx-pips.is-low i.is-alive { background: #d02060; }
+.gx-pips i.is-down { background: #c03028; }
+.gx-pips i.is-empty { background: #f8f8f0; opacity: 0.5; }
+
+/* Definitiva: una sola fila (nombre · barra · cuenta atrás · tecla) */
+.gx-ult {
+  align-items: center;
+  gap: 0.7em;
+  min-height: 3.3em;
+  padding: 0.3em 0.8em;
+  text-align: left;
+  font-size: 0.8em;
+}
+.gx-ult-name { flex: 0 1 auto; max-width: 11em; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gx-ult .gx-bar { flex: 1 1 0; height: 1.2em; }
+.gx-ult-cd { flex: none; min-width: 2.6em; text-align: right; font-size: 1.8em; }
+.gx-key {
+  flex: none;
+  font-size: 0.8em;
+  color: #fff;
+  background: #585858;
+  border: calc(var(--bw) * 0.6) solid #303030;
+  border-radius: calc(var(--bw) * 0.7);
+  padding: 0.3em 0.5em;
+  line-height: 1.2;
+}
+@media (hover: none) and (pointer: coarse) {
+  .gx-key { display: none; }
+}
+@keyframes gx-pulse { 0%, 100% { filter: brightness(1); } 50% { filter: brightness(1.25); } }
+.gx-ult.is-ready { animation: gx-pulse 0.8s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) { .gx-ult.is-ready { animation: none; } }
+
+/* Estadísticas del activo */
+.gx-pstats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.4em; }
+.gx-pstat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.25em;
+  padding: 0.35em 0.2em;
+  min-width: 0;
+  background: #f8f8f0;
+  border: calc(var(--bw) * 0.6) solid #303030;
+  border-radius: calc(var(--bw) * 0.7);
+}
+.gx-pstat-l { font-size: 0.6em; color: #585858; white-space: nowrap; }
+.gx-pstat-v { font-size: 1.5em; line-height: 0.9; }
+
+/* ───────────────────────── Equipo ───────────────────────── */
+
+.gx-team { flex: 1 1 auto; }
+.gx-team-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-auto-rows: 1fr;
+  gap: 0.6em;
+  flex: 1;
+  min-height: 0;
+}
+.gx-slot {
+  position: relative;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 0.25em;
+  padding: 0.45em 0.3em 0.5em;
+  font-size: 1em;
+  min-height: 0;
+  overflow: hidden;
+}
+.gx-slot-idx { position: absolute; left: 0.45em; top: 0.35em; font-size: 0.7em; }
+.gx-slot-pic { position: relative; flex: 1 1 auto; width: 100%; min-height: 2.6em; display: flex; justify-content: center; }
+.gx-slot-img { position: absolute; top: 0; bottom: 0; left: 0; right: 0; margin: auto; width: 100%; height: 100%; max-width: 5em; max-height: 5em; object-fit: contain; }
+.gx-slot-line { display: flex; align-items: center; justify-content: space-between; gap: 0.3em; width: 100%; padding: 0 0.3em; min-width: 0; }
+.gx-slot-name { flex: 1 1 0; min-width: 0; font-size: 0.72em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
+.gx-slot-lv { flex: none; font-size: 1.15em; }
+.gx-slot .pk-chip { flex: none; font-size: 0.6em; }
+/* Nombres en una línea con elipsis: altura de línea holgada para no recortar el texto */
+.gx-next-t, .gx-active-name, .gx-ult-name, .gx-slot-name { line-height: 1.35; }
+.gx-slot .gx-bar { width: 100%; height: 0.8em; flex: none; }
+.gx-slot-foot {
+  width: 100%;
+  min-height: 2.6em;
+  font-size: 0.6em;
+  line-height: 1.25;
+  white-space: normal;
+  text-align: center;
+  color: #5a7090;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  overflow: hidden;
+}
+.gx-slot-foot.is-off { color: #fff; background: #c03028; align-items: center; min-height: 0; margin-top: 0.4em; padding: 0.35em 0; border-radius: 0.3em; }
+.gx-slot-foot span { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.gx-slot-cd {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.65);
+  color: #fff;
+  font-size: 2em;
+}
+
+/* ───────────────────────── Mejoras ───────────────────────── */
+
+.gx-up { display: flex; flex-direction: column; gap: 0.7em; min-height: 0; }
+.gx-gold { display: flex; align-items: center; gap: 0.5em; }
+.gx-gold-n { font-size: 2.2em; line-height: 0.8; }
+
+/* Una fila de ancho completo por mejora: nombre + descripción a la izquierda, precio a la derecha */
+.gx-ulist { display: flex; flex-direction: column; gap: 0.5em; flex: 1; min-height: 0; }
+.gx-urow {
+  flex: 1 1 0;
+  min-height: 0;
+  justify-content: space-between;
+  gap: 0.7em;
+  padding: 0.4em 0.7em;
+  font-size: 1em;
+  text-align: left;
+  white-space: normal;
+}
+.gx-urow-tx { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 0.35em; }
+.gx-urow-name { font-size: 0.8em; line-height: 1.25; }
+.gx-urow-desc {
+  font-size: 0.62em;
+  line-height: 1.35;
+  color: #585858;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.gx-price {
+  flex: none;
+  width: 7em;
+  height: 2.6em;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4em;
+  box-sizing: border-box;
+  font-size: 0.85em;
+  background: #f8f8f0;
+  color: #585858;
+  border: calc(var(--bw) * 0.8) solid #585858;
+  border-radius: calc(var(--bw) * 0.7);
+}
+.gx-urow:disabled { opacity: 1; }
+.gx-urow.can-buy { background: #fff6d0; }
+.gx-urow.can-buy:enabled:hover { background: #ffd860; }
+.gx-urow.can-buy .gx-price { background: #48c048; color: #fff; border-color: #303030; text-shadow: 1px 1px 0 #00000088; }
+.gx-urow.is-team { background: #ffd860; }
+.gx-urow.is-max { background: #c8d0d8; border-color: #585858; box-shadow: 0 var(--bw) 0 #585858; }
+.gx-urow.is-max .gx-urow-name,
+.gx-urow.is-max .gx-urow-desc { color: #585858; }
+.gx-urow.is-max .gx-price { background: #585858; color: #f8f8f0; border-color: #585858; }
+
+.gx-icon-btn.is-muted { opacity: 0.6; background: #e0e0e0; }
+.gx-slot.is-fainted { opacity: 0.8; }
+

@@ -1,5 +1,7 @@
 /**
  * PokéBastion — equipo de 6 con atajos 1-6 y enfriamiento de relevo.
+ * Subsección de `PokemonPanel`: cuadrícula 3×2 de tarjetas del mismo tamaño
+ * (estilos en `ui/gameUi.css`).
  */
 
 import type { Cooldowns6, Team6 } from '../../core/types';
@@ -26,13 +28,17 @@ export function TeamBar({ team, hotSwapCooldowns, teamLevel, onHotSwap, gameStat
   const notInCombat = gameState
     ? gameState.phase !== 'COMBAT' && gameState.phase !== 'PLAYING'
     : false;
+  const occupied = team.filter((s) => s.pokemon !== null).length;
 
   return (
-    <div class="team-bar pk-window shrink-0 p-3">
-      <div class="team-bar-header mb-3 flex items-center gap-2 text-[11px]">
-        <span class="pk-ball" /> EQUIPO
+    <section class="gx-sub gx-team team-bar">
+      <div class="gx-sl team-bar-header">
+        <span>EQUIPO</span>
+        <span>
+          {occupied}/{team.length}
+        </span>
       </div>
-      <div class="team-bar-grid grid grid-cols-3 gap-2.5">
+      <div class="gx-team-grid team-bar-grid">
         {team.map((slot, i) => {
           const pkm = slot.pokemon;
           const isFainted = !pkm ? false : (!pkm.alive || pkm.hp <= 0);
@@ -43,68 +49,56 @@ export function TeamBar({ team, hotSwapCooldowns, teamLevel, onHotSwap, gameStat
           const stars = starsOf(pkm);
           const apex = !!pkm && stars >= MAX_STARS;
           const passive = pkm ? POKEDEX[pkm.definitionId].benchPassive : null;
+          const passiveText =
+            pkm && passive && stars >= 2 ? describePassive(passive.stat, passive.value * (apex ? 2 : 1)) : '';
           return (
             <button
               key={i}
               type="button"
               disabled={disabled}
               onClick={() => onHotSwap(i)}
-              title={
-                pkm && passive && stars >= 2
-                  ? `Pasiva: ${describePassive(passive.stat, passive.value * (apex ? 2 : 1))}${isFainted ? ' (OFF)' : ''}`
-                  : undefined
-              }
+              title={passiveText ? `Pasiva: ${passiveText}${isFainted ? ' (OFF)' : ''}` : undefined}
               data-testid={`team-slot-${i}`}
-              class={`pk-btn team-slot-btn relative flex flex-col items-center gap-1 px-1 py-2 text-[9px] ${
-                slot.isActive ? 'pk-btn-active' : ''
-              } ${isFainted ? 'opacity-65' : ''}`}
-              style={apex ? { borderColor: '#e0a000', boxShadow: '0 4px 0 #e0a000, 0 0 8px #ffd860' } : undefined}
+              class={`gx-btn gx-slot team-slot-btn ${slot.isActive ? 'is-hot' : ''} ${isFainted ? 'is-fainted' : ''}`}
+              style={apex ? { borderColor: '#e0a000', boxShadow: '0 var(--bw) 0 #e0a000, 0 0 8px #ffd860' } : undefined}
             >
-              <span class="absolute left-1 top-1 text-[9px]">{i + 1}</span>
-              {isFainted && (
-                <span className="pk-chip absolute right-1 top-1 bg-[#c03028] text-white text-[8px] px-1 py-0">
-                  DEBILITADO
-                </span>
-              )}
-              {pkm ? (
-                <img
-                  class={`pk-sprite h-10 w-10 ${isFainted ? 'grayscale opacity-50' : ''}`}
-                  src={portraitUrl(pkm.definitionId)}
-                  alt=""
-                  width={40}
-                  height={40}
-                />
-              ) : (
-                <span class="pk-ball h-10 w-10 opacity-30" />
-              )}
-              <span class="w-full truncate text-center text-[8px]" title={pkm ? POKEDEX[pkm.definitionId].name : undefined}>
-                {pkm ? POKEDEX[pkm.definitionId].name : '—'}
+              <span class="gx-slot-idx">{i + 1}</span>
+              <span class="gx-slot-pic">
+                {pkm ? (
+                  <img
+                    class={`pk-sprite gx-slot-img ${isFainted ? 'grayscale opacity-50' : ''}`}
+                    src={portraitUrl(pkm.definitionId)}
+                    alt=""
+                    width={40}
+                    height={40}
+                  />
+                ) : (
+                  <span class="pk-ball gx-slot-img opacity-30" />
+                )}
               </span>
-              {pkm && <TypeChip type={pkm.types[0]} />}
-              {pkm && <StarRow stars={stars} size={7} />}
-              <span class="pk-num">Nv {teamLevel}</span>
-              <span class="pk-bar w-full">
+              <span class="gx-slot-line">
+                <span class="gx-slot-name" title={pkm ? POKEDEX[pkm.definitionId].name : undefined}>
+                  {pkm ? POKEDEX[pkm.definitionId].name : '—'}
+                </span>
+                <span class="gx-num gx-slot-lv">Nv {teamLevel}</span>
+              </span>
+              <span class="gx-slot-line">
+                {pkm ? <TypeChip type={pkm.types[0]} /> : <span class="pk-chip" style={{ visibility: 'hidden' }}>—</span>}
+                {pkm ? <StarRow stars={stars} size="0.55em" /> : <span />}
+              </span>
+              <span class="gx-bar">
                 <span style={{ width: `${hpRatio * 100}%`, background: hpColor(hpRatio) }} />
               </span>
-              {pkm && passive && stars >= 2 && (
-                <span
-                  class={`w-full truncate text-center text-[7px] ${
-                    isFainted ? 'line-through opacity-60' : 'text-[#a8c0e0]'
-                  }`}
-                >
-                  {describePassive(passive.stat, passive.value * (apex ? 2 : 1))}
-                  {isFainted ? ' (OFF)' : ''}
-                </span>
+              {isFainted ? (
+                <span class="gx-slot-foot is-off">DEBILITADO</span>
+              ) : (
+                <span class="gx-slot-foot">{passiveText && <span>{passiveText}</span>}</span>
               )}
-              {onCooldown && (
-                <span class="pk-num absolute inset-0 flex items-center justify-center bg-black/65 text-2xl text-white">
-                  {cooldown.toFixed(1)}s
-                </span>
-              )}
+              {onCooldown && <span class="gx-num gx-slot-cd">{cooldown.toFixed(1)}s</span>}
             </button>
           );
         })}
       </div>
-    </div>
+    </section>
   );
 }
